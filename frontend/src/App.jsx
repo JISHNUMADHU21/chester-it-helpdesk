@@ -23,7 +23,7 @@ const EditUserPage   = lazy(() => import('./pages/admin/users/EditUserPage'))
 const GroupsPage    = lazy(() => import('./pages/admin/groups/GroupsPage'))
 const GroupFormPage = lazy(() => import('./pages/admin/groups/GroupFormPage'))
 
-// ── Admin — Config (Status, Priority, Urgency, WorkType, Label) ───────────────
+// ── Admin — Config ────────────────────────────────────────────────────────────
 const StatusManagePage   = lazy(() => import('./pages/admin/config/StatusManagePage'))
 const PriorityManagePage = lazy(() => import('./pages/admin/config/PriorityManagePage'))
 const UrgencyManagePage  = lazy(() => import('./pages/admin/config/UrgencyManagePage'))
@@ -35,6 +35,9 @@ const AnnouncementsPage = lazy(() => import('./pages/admin/announcements/Announc
 
 // ── Admin — Analytics ─────────────────────────────────────────────────────────
 const AnalyticsPage = lazy(() => import('./pages/admin/analytics/AnalyticsPage'))
+
+// ── Admin — Home Page Management (superadmin only) ────────────────────────────
+const HomePageManagePage = lazy(() => import('./pages/admin/homepage/HomePageManagePage'))
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -85,32 +88,35 @@ export default function App() {
             <Route path="/dashboard" element={<ProtectedLayout requiredRole="manager"><AnalyticsPage /></ProtectedLayout>} />
 
             {/* ── User Management (admin+) ── */}
-            <Route path="/admin/users"            element={<ProtectedLayout requiredRole="admin"><UsersPage /></ProtectedLayout>} />
-            <Route path="/admin/users/create"     element={<ProtectedLayout requiredRole="admin"><CreateUserPage /></ProtectedLayout>} />
-            <Route path="/admin/users/:id/edit"   element={<ProtectedLayout requiredRole="admin"><EditUserPage /></ProtectedLayout>} />
+            <Route path="/admin/users"           element={<ProtectedLayout requiredRole="admin"><UsersPage /></ProtectedLayout>} />
+            <Route path="/admin/users/create"    element={<ProtectedLayout requiredRole="admin"><CreateUserPage /></ProtectedLayout>} />
+            <Route path="/admin/users/:id/edit"  element={<ProtectedLayout requiredRole="admin"><EditUserPage /></ProtectedLayout>} />
 
             {/* ── Group Management (admin+) ── */}
-            <Route path="/admin/groups"           element={<ProtectedLayout requiredRole="admin"><GroupsPage /></ProtectedLayout>} />
-            <Route path="/admin/groups/create"    element={<ProtectedLayout requiredRole="admin"><GroupFormPage /></ProtectedLayout>} />
-            <Route path="/admin/groups/:id/edit"  element={<ProtectedLayout requiredRole="admin"><GroupFormPage /></ProtectedLayout>} />
+            <Route path="/admin/groups"          element={<ProtectedLayout requiredRole="admin"><GroupsPage /></ProtectedLayout>} />
+            <Route path="/admin/groups/create"   element={<ProtectedLayout requiredRole="admin"><GroupFormPage /></ProtectedLayout>} />
+            <Route path="/admin/groups/:id/edit" element={<ProtectedLayout requiredRole="admin"><GroupFormPage /></ProtectedLayout>} />
 
             {/* ── Status Management (admin+) ── */}
-            <Route path="/admin/statuses"         element={<ProtectedLayout requiredRole="admin"><StatusManagePage /></ProtectedLayout>} />
+            <Route path="/admin/statuses"        element={<ProtectedLayout requiredRole="admin"><StatusManagePage /></ProtectedLayout>} />
 
             {/* ── Priority Management (admin+) ── */}
-            <Route path="/admin/priority"         element={<ProtectedLayout requiredRole="admin"><PriorityManagePage /></ProtectedLayout>} />
+            <Route path="/admin/priority"        element={<ProtectedLayout requiredRole="admin"><PriorityManagePage /></ProtectedLayout>} />
 
             {/* ── Urgency Management (admin+) ── */}
-            <Route path="/admin/urgency"          element={<ProtectedLayout requiredRole="admin"><UrgencyManagePage /></ProtectedLayout>} />
+            <Route path="/admin/urgency"         element={<ProtectedLayout requiredRole="admin"><UrgencyManagePage /></ProtectedLayout>} />
 
             {/* ── Work Type Management (manager+) ── */}
-            <Route path="/admin/worktypes"        element={<ProtectedLayout requiredRole="manager"><WorkTypeManagePage /></ProtectedLayout>} />
+            <Route path="/admin/worktypes"       element={<ProtectedLayout requiredRole="manager"><WorkTypeManagePage /></ProtectedLayout>} />
 
             {/* ── Label Management (manager+) ── */}
-            <Route path="/admin/labels"           element={<ProtectedLayout requiredRole="manager"><LabelManagePage /></ProtectedLayout>} />
+            <Route path="/admin/labels"          element={<ProtectedLayout requiredRole="manager"><LabelManagePage /></ProtectedLayout>} />
 
             {/* ── Announcements (manager+) ── */}
-            <Route path="/admin/announcements"    element={<ProtectedLayout requiredRole="manager"><AnnouncementsPage /></ProtectedLayout>} />
+            <Route path="/admin/announcements"   element={<ProtectedLayout requiredRole="manager"><AnnouncementsPage /></ProtectedLayout>} />
+
+            {/* ── Home Page Management (superadmin only) ── */}
+            <Route path="/admin/home-page"       element={<ProtectedLayout requiredRole="superadmin"><HomePageManagePage /></ProtectedLayout>} />
 
             {/* ── Fallback ── */}
             <Route path="*" element={<Navigate to="/" replace />} />
