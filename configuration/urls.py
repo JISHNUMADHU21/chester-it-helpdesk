@@ -1,0 +1,34 @@
+from django.urls import path
+from .views import (
+    StatusListCreateView,       StatusDetailView,
+    PriorityListCreateView,     PriorityDetailView,
+    UrgencyListCreateView,      UrgencyDetailView,
+    WorkTypeListCreateView,     WorkTypeDetailView,
+    AnnouncementListCreateView, AnnouncementDetailView,
+    HomePageLayoutView,
+)
+
+urlpatterns = [
+    # Status
+    path('config/statuses/',              StatusListCreateView.as_view(),       name='status-list-create'),
+    path('config/statuses/<int:pk>/',     StatusDetailView.as_view(),           name='status-detail'),
+
+    # Priority
+    path('config/priorities/',            PriorityListCreateView.as_view(),     name='priority-list-create'),
+    path('config/priorities/<int:pk>/',   PriorityDetailView.as_view(),         name='priority-detail'),
+
+    # Urgency
+    path('config/urgencies/',             UrgencyListCreateView.as_view(),      name='urgency-list-create'),
+    path('config/urgencies/<int:pk>/',    UrgencyDetailView.as_view(),          name='urgency-detail'),
+
+    # Work Type
+    path('config/work-types/',            WorkTypeListCreateView.as_view(),     name='worktype-list-create'),
+    path('config/work-types/<int:pk>/',   WorkTypeDetailView.as_view(),         name='worktype-detail'),
+
+    # Announcements
+    path('config/announcements/',         AnnouncementListCreateView.as_view(), name='announcement-list-create'),
+    path('config/announcements/<int:pk>/', AnnouncementDetailView.as_view(),    name='announcement-detail'),
+
+    # Home Page Layout
+    path('config/homepage-layout/',       HomePageLayoutView.as_view(),         name='homepage-layout'),
+]

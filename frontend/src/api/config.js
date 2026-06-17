@@ -1,0 +1,59 @@
+import client from './client'
+
+// ── STATUS ────────────────────────────────────────────────────────────────────
+export const statusAPI = {
+  list:   ()         => client.get('/config/statuses/'),
+  get:    (id)       => client.get(`/config/statuses/${id}/`),
+  create: (data)     => client.post('/config/statuses/', data),
+  update: (id, data) => client.patch(`/config/statuses/${id}/`, data),
+  delete: (id)       => client.delete(`/config/statuses/${id}/`),
+}
+
+// ── PRIORITY ──────────────────────────────────────────────────────────────────
+export const priorityAPI = {
+  list:   ()         => client.get('/config/priorities/'),
+  get:    (id)       => client.get(`/config/priorities/${id}/`),
+  create: (data)     => client.post('/config/priorities/', data),
+  update: (id, data) => client.patch(`/config/priorities/${id}/`, data),
+  delete: (id)       => client.delete(`/config/priorities/${id}/`),
+}
+
+// ── URGENCY ───────────────────────────────────────────────────────────────────
+export const urgencyAPI = {
+  list:   ()         => client.get('/config/urgencies/'),
+  get:    (id)       => client.get(`/config/urgencies/${id}/`),
+  create: (data)     => client.post('/config/urgencies/', data),
+  update: (id, data) => client.patch(`/config/urgencies/${id}/`, data),
+  delete: (id)       => client.delete(`/config/urgencies/${id}/`),
+}
+
+// ── WORK TYPE ─────────────────────────────────────────────────────────────────
+export const workTypeAPI = {
+  list:       (params) => client.get('/config/work-types/', { params }),
+  listByGroup: (groupId) => client.get('/config/work-types/', { params: { group: groupId } }),
+  get:        (id)       => client.get(`/config/work-types/${id}/`),
+  create:     (data)     => client.post('/config/work-types/', data, {
+    headers: data instanceof FormData ? { 'Content-Type': 'multipart/form-data' } : {},
+  }),
+  update:     (id, data) => client.patch(`/config/work-types/${id}/`, data, {
+    headers: data instanceof FormData ? { 'Content-Type': 'multipart/form-data' } : {},
+  }),
+  delete:     (id)       => client.delete(`/config/work-types/${id}/`),
+}
+
+// ── ANNOUNCEMENTS ─────────────────────────────────────────────────────────────
+export const announcementAPI = {
+  list:   ()         => client.get('/config/announcements/'),
+  get:    (id)       => client.get(`/config/announcements/${id}/`),
+  create: (data)     => client.post('/config/announcements/', data),
+  update: (id, data) => client.patch(`/config/announcements/${id}/`, data),
+  delete: (id)       => client.delete(`/config/announcements/${id}/`),
+}
+
+// ── HOME PAGE LAYOUT ──────────────────────────────────────────────────────────
+export const homePageAPI = {
+  // Returns { layout: [groupId|null, ...8 items], tiles: [groupObj|null, ...8 items] }
+  get:    ()       => client.get('/config/homepage-layout/'),
+  // layout: array of 8 items, each is a group ID (number) or null
+  update: (layout) => client.put('/config/homepage-layout/', { layout }),
+}
