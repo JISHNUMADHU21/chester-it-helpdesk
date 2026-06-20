@@ -1,4 +1,5 @@
 from django.contrib.auth import get_user_model
+from django.db import models
 from rest_framework import status, generics, permissions
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.response import Response
@@ -22,11 +23,6 @@ User = get_user_model()
 # ── AUTHENTICATION ────────────────────────────────────────────────────────────
 
 class LoginView(APIView):
-    """
-    POST /api/auth/login/
-    Accepts email + password, returns access + refresh JWT tokens.
-    No authentication required.
-    """
     permission_classes = [permissions.AllowAny]
 
     def post(self, request):
@@ -59,10 +55,6 @@ class LoginView(APIView):
 
 
 class LogoutView(APIView):
-    """
-    POST /api/auth/logout/
-    Blacklists the refresh token to invalidate the session.
-    """
     permission_classes = [permissions.IsAuthenticated]
 
     def post(self, request):
@@ -86,14 +78,10 @@ class LogoutView(APIView):
 # ── CURRENT USER PROFILE ──────────────────────────────────────────────────────
 
 class MeView(APIView):
-    """
-    GET  /api/auth/me/  — Returns current user profile
-    PATCH /api/auth/me/ — Updates designation only (name/email set by admin)
-    """
     permission_classes = [permissions.IsAuthenticated]
 
     def get(self, request):
-        serializer = UserSerializer(request.user)
+        serializer = UserSerializer(request.user, context={'request': request})
         return Response(serializer.data)
 
     def patch(self, request):
@@ -101,6 +89,7 @@ class MeView(APIView):
             request.user,
             data=request.data,
             partial=True,
+            context={'request': request},
         )
         serializer.is_valid(raise_exception=True)
         serializer.save()
@@ -108,10 +97,6 @@ class MeView(APIView):
 
 
 class AvatarUpdateView(APIView):
-    """
-    PATCH /api/auth/me/avatar/
-    Allows the logged-in user to upload or change their profile picture.
-    """
     permission_classes = [permissions.IsAuthenticated]
 
     def patch(self, request):
@@ -122,14 +107,10 @@ class AvatarUpdateView(APIView):
         )
         serializer.is_valid(raise_exception=True)
         serializer.save()
-        return Response(UserSerializer(request.user).data)
+        return Response(UserSerializer(request.user, context={'request': request}).data)
 
 
 class ChangePasswordView(APIView):
-    """
-    POST /api/auth/me/change-password/
-    Allows the logged-in user to change their own password.
-    """
     permission_classes = [permissions.IsAuthenticated]
 
     def post(self, request):
@@ -143,31 +124,29 @@ class ChangePasswordView(APIView):
         return Response({'detail': 'Password updated successfully.'})
 
 
-# ── USER MANAGEMENT (Admin / Super Admin) ─────────────────────────────────────
+# ── PERMISSIONS ───────────────────────────────────────────────────────────────
 
 class IsAdminOrSuperAdmin(permissions.BasePermission):
-    """Allows access to admin and superadmin roles only."""
     def has_permission(self, request, view):
-        return request.user.is_authenticated and request.user.role in ('admin', 'superadmin')
+        return request.user.is_authenticated and \
+               request.user.role in ('admin', 'superadmin')
 
 
 class IsSuperAdmin(permissions.BasePermission):
-    """Allows access to superadmin role only."""
     def has_permission(self, request, view):
-        return request.user.is_authenticated and request.user.role == 'superadmin'
+        return request.user.is_authenticated and \
+               request.user.role == 'superadmin'
 
 
 class IsManagerOrAbove(permissions.BasePermission):
-    """Allows access to manager, admin and superadmin roles."""
     def has_permission(self, request, view):
-        return request.user.is_authenticated and request.user.role in ('manager', 'admin', 'superadmin')
+        return request.user.is_authenticated and \
+               request.user.role in ('manager', 'admin', 'superadmin')
 
+
+# ── USER MANAGEMENT ───────────────────────────────────────────────────────────
 
 class UserListCreateView(generics.ListCreateAPIView):
-    """
-    GET  /api/users/  — List users (role-filtered)
-    POST /api/users/  — Create user (admin+ only)
-    """
     permission_classes = [IsAdminOrSuperAdmin]
 
     def get_serializer_class(self):
@@ -175,23 +154,26 @@ class UserListCreateView(generics.ListCreateAPIView):
             return UserCreateSerializer
         return UserSerializer
 
+    def get_serializer_context(self):
+        context = super().get_serializer_context()
+        context['request'] = self.request
+        return context
+
     def get_queryset(self):
         user = self.request.user
         qs   = User.objects.all().order_by('first_name', 'last_name')
 
-        # Managers can only see users in their own groups
         if user.role == 'manager':
             group_ids = user.helpdesk_groups.values_list('id', flat=True)
             qs = qs.filter(helpdesk_groups__id__in=group_ids).distinct()
 
-        # Admins cannot see or list other admins (only superadmin can)
+        # Admin cannot see superadmin or other admin accounts
         if user.role == 'admin':
             qs = qs.exclude(role__in=['admin', 'superadmin'])
 
         return qs
 
     def perform_create(self, serializer):
-        # Only superadmin can create admin accounts
         role = self.request.data.get('role', 'user')
         if role in ('admin', 'superadmin') and self.request.user.role != 'superadmin':
             from rest_framework.exceptions import PermissionDenied
@@ -200,11 +182,6 @@ class UserListCreateView(generics.ListCreateAPIView):
 
 
 class UserDetailView(generics.RetrieveUpdateDestroyAPIView):
-    """
-    GET    /api/users/{id}/  — Get user detail
-    PATCH  /api/users/{id}/  — Update user
-    DELETE /api/users/{id}/  — Deactivate user (soft delete)
-    """
     permission_classes = [IsAdminOrSuperAdmin]
 
     def get_serializer_class(self):
@@ -212,24 +189,32 @@ class UserDetailView(generics.RetrieveUpdateDestroyAPIView):
             return UserUpdateSerializer
         return UserSerializer
 
+    def get_serializer_context(self):
+        context = super().get_serializer_context()
+        context['request'] = self.request
+        return context
+
     def get_queryset(self):
         user = self.request.user
-        qs   = User.objects.all()
 
-        # Managers can only manage users in their own groups
+        # Superadmin can access all users
+        if user.role == 'superadmin':
+            return User.objects.all()
+
+        # Admin can access all users except other admins and superadmins
+        if user.role == 'admin':
+            return User.objects.exclude(role__in=['admin', 'superadmin'])
+
+        # Manager can only access users in their own groups
         if user.role == 'manager':
             group_ids = user.helpdesk_groups.values_list('id', flat=True)
-            qs = qs.filter(helpdesk_groups__id__in=group_ids).distinct()
+            return User.objects.filter(
+                helpdesk_groups__id__in=group_ids
+            ).distinct()
 
-        # Admins cannot manage other admin accounts
-        if user.role == 'admin':
-            qs = qs.exclude(role__in=['admin', 'superadmin'])
-
-        return qs
+        return User.objects.none()
 
     def perform_update(self, serializer):
-        target = self.get_object()
-        # Prevent admin from changing another user's role to admin/superadmin
         new_role = self.request.data.get('role')
         if new_role in ('admin', 'superadmin') and self.request.user.role != 'superadmin':
             from rest_framework.exceptions import PermissionDenied
@@ -237,7 +222,6 @@ class UserDetailView(generics.RetrieveUpdateDestroyAPIView):
         serializer.save()
 
     def perform_destroy(self, instance):
-        # Soft delete — deactivate instead of deleting
         instance.is_active = False
         instance.save()
 
@@ -247,21 +231,17 @@ class UserDetailView(generics.RetrieveUpdateDestroyAPIView):
 @api_view(['GET'])
 @permission_classes([permissions.IsAuthenticated])
 def user_search(request):
-    """
-    GET /api/users/search/?q=<query>
-    Returns users matching the search query.
-    Used by the @mention system and assignee dropdown.
-    """
     query = request.query_params.get('q', '').strip()
     if not query:
         return Response([])
 
+    from django.db.models import Q
     users = User.objects.filter(
         is_active=True,
     ).filter(
-        models.Q(first_name__icontains=query) |
-        models.Q(last_name__icontains=query)  |
-        models.Q(email__icontains=query)
+        Q(first_name__icontains=query) |
+        Q(last_name__icontains=query)  |
+        Q(email__icontains=query)
     ).order_by('first_name', 'last_name')[:20]
 
     return Response(UserMinimalSerializer(users, many=True).data)

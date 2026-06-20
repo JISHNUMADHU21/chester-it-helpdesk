@@ -5,6 +5,7 @@ from .views import (
     UrgencyListCreateView,      UrgencyDetailView,
     WorkTypeListCreateView,     WorkTypeDetailView,
     AnnouncementListCreateView, AnnouncementDetailView,
+    AnnouncementAttachmentListCreateView, AnnouncementAttachmentDetailView,
     HomePageLayoutView,
 )
 
@@ -26,9 +27,21 @@ urlpatterns = [
     path('config/work-types/<int:pk>/',   WorkTypeDetailView.as_view(),         name='worktype-detail'),
 
     # Announcements
-    path('config/announcements/',         AnnouncementListCreateView.as_view(), name='announcement-list-create'),
-    path('config/announcements/<int:pk>/', AnnouncementDetailView.as_view(),    name='announcement-detail'),
+    path('config/announcements/',          AnnouncementListCreateView.as_view(), name='announcement-list-create'),
+    path('config/announcements/<int:pk>/', AnnouncementDetailView.as_view(),     name='announcement-detail'),
+
+    # Announcement Attachments
+    path(
+        'config/announcements/<int:announcement_id>/attachments/',
+        AnnouncementAttachmentListCreateView.as_view(),
+        name='announcement-attachment-list-create',
+    ),
+    path(
+        'config/announcements/<int:announcement_id>/attachments/<int:pk>/',
+        AnnouncementAttachmentDetailView.as_view(),
+        name='announcement-attachment-detail',
+    ),
 
     # Home Page Layout
-    path('config/homepage-layout/',       HomePageLayoutView.as_view(),         name='homepage-layout'),
+    path('config/homepage-layout/', HomePageLayoutView.as_view(), name='homepage-layout'),
 ]

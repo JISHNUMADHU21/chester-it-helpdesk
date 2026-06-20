@@ -44,13 +44,13 @@ function PriorityIcon({ slug, colour }) {
 }
 
 const FIELDS = [
-  { key: 'name',       label: 'Name',    required: true, placeholder: 'e.g. Critical'  },
-  { key: 'slug',       label: 'Slug',    required: true, placeholder: 'e.g. critical',
+  { key: 'name',       label: 'Name',   required: true, placeholder: 'e.g. Critical'  },
+  { key: 'slug',       label: 'Slug',   required: true, placeholder: 'e.g. critical',
     hint: 'Unique identifier. Lowercase and underscores only. Use: highest, high, medium, low, lowest' },
-  { key: 'colour_hex', label: 'Colour',  type: 'color',  default: '#DFE1E6' },
-  { key: 'level',      label: 'Level',   type: 'number', default: 1, min: 1,
+  { key: 'colour_hex', label: 'Colour', type: 'color',  default: '#DFE1E6' },
+  { key: 'level',      label: 'Level',  type: 'number', default: 1, min: 1,
     hint: 'Lower number = higher priority (1 = highest).' },
-  { key: 'is_active',  label: 'Status',  type: 'toggle', default: true },
+  { key: 'is_active',  label: 'Status', type: 'toggle', default: true },
 ]
 
 const COLUMNS = [

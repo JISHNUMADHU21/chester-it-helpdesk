@@ -1,5 +1,6 @@
 from django.db import models
 from django.contrib.auth import get_user_model
+from django.utils import timezone
 
 User = get_user_model()
 
@@ -91,7 +92,6 @@ class WorkType(models.Model):
     order       = models.PositiveIntegerField(default=0)
     is_default  = models.BooleanField(default=False)
     is_active   = models.BooleanField(default=True)
-    # M2M — a work type can belong to multiple groups
     groups      = models.ManyToManyField(
         'departments.Group',
         blank=True,
@@ -125,16 +125,36 @@ class Announcement(models.Model):
         ('info',        'Info'),
     ]
 
-    title      = models.CharField(max_length=200)
-    body       = models.TextField()
-    tag        = models.CharField(max_length=20, choices=TAG_CHOICES, default='info')
-    is_active  = models.BooleanField(default=True)
-    created_by = models.ForeignKey(
+    title        = models.CharField(max_length=200)
+    body         = models.TextField()
+    tag          = models.CharField(max_length=20, choices=TAG_CHOICES, default='info')
+
+    # ── Group targeting ───────────────────────────────────────────────────────
+    groups       = models.ManyToManyField(
+        'departments.Group',
+        blank=True,
+        related_name='announcements',
+        db_table='announcement_groups',
+        help_text='Leave empty to show to all users. Select groups to target specific members.',
+    )
+
+    # ── Scheduling & visibility window ────────────────────────────────────────
+    visible_from = models.DateTimeField(
+        null=True, blank=True,
+        help_text='When to start showing this announcement. Null = show immediately.',
+    )
+    visible_till = models.DateTimeField(
+        null=True, blank=True,
+        help_text='When to stop showing this announcement. Null = never expires.',
+    )
+
+    is_active    = models.BooleanField(default=True)
+    created_by   = models.ForeignKey(
         User, on_delete=models.SET_NULL,
         null=True, related_name='announcements',
     )
-    created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
+    created_at   = models.DateTimeField(auto_now_add=True)
+    updated_at   = models.DateTimeField(auto_now=True)
 
     class Meta:
         db_table            = 'config_announcement'
@@ -145,14 +165,81 @@ class Announcement(models.Model):
     def __str__(self):
         return self.title
 
+    # ── Computed status properties ────────────────────────────────────────────
+
+    @property
+    def is_scheduled(self):
+        return bool(self.visible_from and self.visible_from > timezone.now())
+
+    @property
+    def is_expired(self):
+        return bool(self.visible_till and self.visible_till < timezone.now())
+
+    @property
+    def is_currently_visible(self):
+        if not self.is_active:
+            return False
+        now = timezone.now()
+        if self.visible_from and self.visible_from > now:
+            return False
+        if self.visible_till and self.visible_till < now:
+            return False
+        return True
+
+    def is_visible_to_user(self, user):
+        if self.created_by_id == user.pk:
+            return True
+        if not self.is_currently_visible:
+            return False
+        target_groups = self.groups.values_list('id', flat=True)
+        if not target_groups:
+            return True
+        user_groups = user.helpdesk_groups.values_list('id', flat=True)
+        return bool(set(target_groups) & set(user_groups))
+
+
+class AnnouncementAttachment(models.Model):
+    """
+    Attachments for an announcement — supports images, PDFs, videos, and
+    external links. A single announcement can have multiple attachments
+    of mixed types.
+    """
+    ATTACHMENT_TYPES = [
+        ('image', 'Image'),
+        ('pdf',   'PDF'),
+        ('video', 'Video'),
+        ('link',  'Link'),
+    ]
+
+    announcement = models.ForeignKey(
+        Announcement,
+        on_delete=models.CASCADE,
+        related_name='attachments',
+    )
+    attachment_type = models.CharField(max_length=10, choices=ATTACHMENT_TYPES)
+
+    # For image / pdf / video — the uploaded file
+    file        = models.FileField(
+        upload_to='announcement_attachments/%Y/%m/',
+        blank=True, null=True,
+    )
+    # For link type — the URL
+    url         = models.URLField(max_length=500, blank=True)
+    # Optional display label (e.g. link text, or original filename)
+    label       = models.CharField(max_length=255, blank=True)
+
+    order       = models.PositiveIntegerField(default=0)
+    created_at  = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'announcement_attachments'
+        ordering = ['order', 'created_at']
+
+    def __str__(self):
+        return f'{self.get_attachment_type_display()} — {self.label or self.announcement.title}'
+
 
 class HomePageLayout(models.Model):
-    """
-    Stores the homepage tile layout as an ordered list of group IDs.
-    Always a single record — use HomePageLayout.get_or_create_default().
-    8 slots total, some may be null (empty).
-    """
-    # JSON array of 8 items — each is a group ID (int) or null
     layout     = models.JSONField(
         default=list,
         help_text='Ordered list of 8 group IDs (null = empty slot)',
@@ -173,20 +260,14 @@ class HomePageLayout(models.Model):
 
     @classmethod
     def get_or_create_default(cls):
-        """
-        Returns the single HomePageLayout record, creating it with
-        the default 8-group layout if it doesn't exist yet.
-        """
         instance = cls.objects.first()
         if not instance:
             from departments.models import Group
-            # Default: first 8 active groups by order
             default_groups = list(
                 Group.objects.filter(is_active=True)
                 .order_by('order', 'name')
                 .values_list('id', flat=True)[:8]
             )
-            # Pad to 8 slots with None
-            layout = default_groups + [None] * (8 - len(default_groups))
+            layout   = default_groups + [None] * (8 - len(default_groups))
             instance = cls.objects.create(layout=layout)
         return instance

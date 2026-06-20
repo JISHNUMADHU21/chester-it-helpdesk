@@ -1,5 +1,6 @@
 from rest_framework import serializers
-from .models import Status, Priority, Urgency, WorkType, Announcement, HomePageLayout
+from django.utils import timezone
+from .models import Status, Priority, Urgency, WorkType, Announcement, AnnouncementAttachment, HomePageLayout
 from departments.models import Group
 
 
@@ -161,17 +162,79 @@ class WorkTypeCreateUpdateSerializer(serializers.ModelSerializer):
         return instance
 
 
+# ── ANNOUNCEMENT ATTACHMENTS ──────────────────────────────────────────────────
+
+class AnnouncementAttachmentSerializer(serializers.ModelSerializer):
+    file_url = serializers.SerializerMethodField()
+
+    class Meta:
+        model  = AnnouncementAttachment
+        fields = [
+            'id', 'attachment_type', 'file', 'file_url',
+            'url', 'label', 'order', 'created_at',
+        ]
+        read_only_fields = ['id', 'created_at']
+        extra_kwargs = {
+            'file': {'write_only': True, 'required': False},
+        }
+
+    def get_file_url(self, obj):
+        # IMPORTANT: return a RELATIVE url (e.g. /media/...) rather than an
+        # absolute one (e.g. http://127.0.0.1:8000/media/...).
+        #
+        # The frontend dev server (Vite) proxies /media/* to the Django
+        # backend, but that proxy only applies to requests made FROM
+        # JavaScript (fetch/axios/img/video src). An <iframe src="..."> is a
+        # full top-level browser navigation and will go directly to whatever
+        # host is in the URL — bypassing the Vite proxy entirely. Pointing
+        # straight at 127.0.0.1:8000 from inside an iframe nested under
+        # localhost:5173 can fail to connect depending on the browser/host
+        # binding. Returning a relative URL keeps everything on the same
+        # origin as the React app, and Vite's proxy transparently forwards
+        # it to Django.
+        if obj.file:
+            return obj.file.url
+        return None
+
+    def validate(self, data):
+        attachment_type = data.get('attachment_type')
+        file            = data.get('file')
+        url             = data.get('url')
+
+        if attachment_type == 'link':
+            if not url:
+                raise serializers.ValidationError({'url': 'URL is required for link attachments.'})
+        else:
+            if not file and not self.instance:
+                raise serializers.ValidationError({'file': 'File is required for this attachment type.'})
+
+        return data
+
+
 # ── ANNOUNCEMENT ──────────────────────────────────────────────────────────────
 
+class AnnouncementGroupSerializer(serializers.ModelSerializer):
+    class Meta:
+        model  = Group
+        fields = ['id', 'name', 'icon', 'prefix']
+
+
 class AnnouncementSerializer(serializers.ModelSerializer):
-    created_by_name = serializers.SerializerMethodField()
-    tag_display     = serializers.SerializerMethodField()
+    created_by_name   = serializers.SerializerMethodField()
+    tag_display       = serializers.SerializerMethodField()
+    groups            = AnnouncementGroupSerializer(many=True, read_only=True)
+    visibility_status = serializers.SerializerMethodField()
+    attachments       = AnnouncementAttachmentSerializer(many=True, read_only=True)
 
     class Meta:
         model  = Announcement
         fields = [
             'id', 'title', 'body', 'tag', 'tag_display',
-            'is_active', 'created_by', 'created_by_name',
+            'groups',
+            'visible_from', 'visible_till',
+            'is_active', 'visibility_status',
+            'attachments',
+            'created_by', 'created_by_name',
             'created_at', 'updated_at',
         ]
         read_only_fields = ['id', 'created_by', 'created_at', 'updated_at']
@@ -182,17 +245,62 @@ class AnnouncementSerializer(serializers.ModelSerializer):
     def get_tag_display(self, obj):
         return obj.get_tag_display()
 
+    def get_visibility_status(self, obj):
+        if not obj.is_active:
+            return 'draft'
+        if obj.is_scheduled:
+            return 'scheduled'
+        if obj.is_expired:
+            return 'expired'
+        return 'live'
+
 
 class AnnouncementCreateUpdateSerializer(serializers.ModelSerializer):
+    id = serializers.IntegerField(read_only=True)
+
+    group_ids = serializers.ListField(
+        child=serializers.IntegerField(),
+        write_only=True,
+        required=False,
+        default=list,
+    )
+
     class Meta:
         model  = Announcement
-        fields = ['title', 'body', 'tag', 'is_active']
+        fields = [
+            'id', 'title', 'body', 'tag', 'is_active',
+            'visible_from', 'visible_till',
+            'group_ids',
+        ]
+        read_only_fields = ['id']
+
+    def validate(self, data):
+        visible_from = data.get('visible_from')
+        visible_till = data.get('visible_till')
+        if visible_from and visible_till and visible_from >= visible_till:
+            raise serializers.ValidationError({
+                'visible_till': 'Visible Till must be after Visible From.'
+            })
+        return data
+
+    def create(self, validated_data):
+        group_ids = validated_data.pop('group_ids', [])
+        instance  = super().create(validated_data)
+        if group_ids:
+            instance.groups.set(Group.objects.filter(id__in=group_ids))
+        return instance
+
+    def update(self, instance, validated_data):
+        group_ids = validated_data.pop('group_ids', None)
+        instance  = super().update(instance, validated_data)
+        if group_ids is not None:
+            instance.groups.set(Group.objects.filter(id__in=group_ids))
+        return instance
 
 
 # ── HOME PAGE LAYOUT ──────────────────────────────────────────────────────────
 
 class HomePageGroupSerializer(serializers.ModelSerializer):
-    """Minimal group info for homepage tiles."""
     icon_image_url = serializers.SerializerMethodField()
 
     class Meta:
@@ -209,11 +317,7 @@ class HomePageGroupSerializer(serializers.ModelSerializer):
 
 
 class HomePageLayoutSerializer(serializers.ModelSerializer):
-    """
-    Returns the layout as an array of 8 items.
-    Each item is either a full group object or null (empty slot).
-    """
-    tiles      = serializers.SerializerMethodField()
+    tiles           = serializers.SerializerMethodField()
     updated_by_name = serializers.SerializerMethodField()
 
     class Meta:
@@ -222,10 +326,6 @@ class HomePageLayoutSerializer(serializers.ModelSerializer):
         read_only_fields = ['id', 'updated_at']
 
     def get_tiles(self, obj):
-        """
-        Resolve each group ID in layout to full group data.
-        Null slots remain null.
-        """
         request = self.context.get('request')
         result  = []
         for item in obj.layout:
@@ -246,9 +346,6 @@ class HomePageLayoutSerializer(serializers.ModelSerializer):
 
 
 class HomePageLayoutUpdateSerializer(serializers.Serializer):
-    """
-    Accepts layout as a list of 8 items — each is a group ID (int) or null.
-    """
     layout = serializers.ListField(
         child=serializers.IntegerField(allow_null=True, min_value=1),
         min_length=8,
@@ -256,13 +353,11 @@ class HomePageLayoutUpdateSerializer(serializers.Serializer):
     )
 
     def validate_layout(self, value):
-        # Check no duplicate group IDs (nulls are allowed multiple times)
         non_null = [v for v in value if v is not None]
         if len(non_null) != len(set(non_null)):
             raise serializers.ValidationError(
                 'Duplicate group IDs are not allowed in the layout.'
             )
-        # Check all non-null IDs are valid active groups
         valid_ids = set(
             Group.objects.filter(
                 id__in=non_null, is_active=True

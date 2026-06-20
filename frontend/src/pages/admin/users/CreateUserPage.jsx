@@ -43,20 +43,23 @@ function SelectWrap({ children }) {
 }
 
 export default function CreateUserPage() {
-  const navigate        = useNavigate()
+  const navigate         = useNavigate()
   const { isSuperAdmin } = useAuth()
-  const queryClient     = useQueryClient()
+  const queryClient      = useQueryClient()
 
-  const [firstName,    setFirstName]    = useState('')
-  const [lastName,     setLastName]     = useState('')
-  const [email,        setEmail]        = useState('')
-  const [password,     setPassword]     = useState('')
-  const [role,         setRole]         = useState('user')
-  const [designation,  setDesignation]  = useState('')
-  const [groupIds,     setGroupIds]     = useState([])
-  const [deptSearch,   setDeptSearch]   = useState('')
-  const [errors,       setErrors]       = useState({})
-  const [showPassword, setShowPassword] = useState(false)
+  const [firstName,       setFirstName]       = useState('')
+  const [lastName,        setLastName]        = useState('')
+  const [email,           setEmail]           = useState('')
+  const [password,        setPassword]        = useState('')
+  const [confirmPassword, setConfirmPassword] = useState('')
+  const [role,            setRole]            = useState('user')
+  const [designation,     setDesignation]     = useState('')
+  const [isActive,        setIsActive]        = useState(true)
+  const [groupIds,        setGroupIds]        = useState([])
+  const [deptSearch,      setDeptSearch]      = useState('')
+  const [errors,          setErrors]          = useState({})
+  const [showPassword,    setShowPassword]    = useState(false)
+  const [showConfirm,     setShowConfirm]     = useState(false)
 
   const { data: groupsData } = useQuery({
     queryKey: ['groups'],
@@ -64,7 +67,6 @@ export default function CreateUserPage() {
   })
   const groups = groupsData || []
 
-  // Filtered groups based on search
   const filteredGroups = groups.filter(g =>
     !deptSearch ||
     g.name.toLowerCase().includes(deptSearch.toLowerCase()) ||
@@ -87,6 +89,8 @@ export default function CreateUserPage() {
     else if (!/\S+@\S+\.\S+/.test(email)) e.email = 'Enter a valid email address'
     if (!password.trim())  e.password  = 'Password is required'
     else if (password.length < 8) e.password = 'Password must be at least 8 characters'
+    if (!confirmPassword.trim()) e.confirmPassword = 'Please confirm your password'
+    else if (confirmPassword !== password) e.confirmPassword = 'Passwords do not match'
     setErrors(e)
     return Object.keys(e).length === 0
   }
@@ -101,6 +105,7 @@ export default function CreateUserPage() {
       password,
       role,
       designation,
+      is_active: isActive,
       group_ids: groupIds,
     })
   }
@@ -133,13 +138,17 @@ export default function CreateUserPage() {
         </div>
       )}
 
-      <form onSubmit={handleSubmit} noValidate>
+      {/* autoComplete="off" on form prevents browser autofill */}
+      <form onSubmit={handleSubmit} noValidate autoComplete="off">
         <div style={{ background: '#fff', border: '1px solid var(--border)', borderRadius: 8, padding: '28px 32px', maxWidth: 700 }}>
 
           {/* Name row */}
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 0 }}>
             <Field label="First Name" required error={errors.firstName}>
-              <input type="text" value={firstName}
+              <input
+                type="text"
+                autoComplete="off"
+                value={firstName}
                 onChange={e => { setFirstName(e.target.value); setErrors(p => ({ ...p, firstName: '' })) }}
                 placeholder="e.g. John"
                 style={{ ...inputStyle, borderColor: errors.firstName ? 'var(--danger)' : 'var(--border)' }}
@@ -148,7 +157,10 @@ export default function CreateUserPage() {
               />
             </Field>
             <Field label="Last Name" required error={errors.lastName}>
-              <input type="text" value={lastName}
+              <input
+                type="text"
+                autoComplete="off"
+                value={lastName}
                 onChange={e => { setLastName(e.target.value); setErrors(p => ({ ...p, lastName: '' })) }}
                 placeholder="e.g. Smith"
                 style={{ ...inputStyle, borderColor: errors.lastName ? 'var(--danger)' : 'var(--border)' }}
@@ -159,7 +171,10 @@ export default function CreateUserPage() {
           </div>
 
           <Field label="Email Address" required error={errors.email}>
-            <input type="email" value={email}
+            <input
+              type="email"
+              autoComplete="new-password"
+              value={email}
               onChange={e => { setEmail(e.target.value); setErrors(p => ({ ...p, email: '' })) }}
               placeholder="e.g. john.smith@chesterracecourse.co.uk"
               style={{ ...inputStyle, borderColor: errors.email ? 'var(--danger)' : 'var(--border)' }}
@@ -172,6 +187,7 @@ export default function CreateUserPage() {
             <div style={{ position: 'relative' }}>
               <input
                 type={showPassword ? 'text' : 'password'}
+                autoComplete="new-password"
                 value={password}
                 onChange={e => { setPassword(e.target.value); setErrors(p => ({ ...p, password: '' })) }}
                 placeholder="Minimum 8 characters"
@@ -186,8 +202,31 @@ export default function CreateUserPage() {
             </div>
           </Field>
 
+          <Field label="Confirm Password" required error={errors.confirmPassword}>
+            <div style={{ position: 'relative' }}>
+              <input
+                type={showConfirm ? 'text' : 'password'}
+                autoComplete="new-password"
+                value={confirmPassword}
+                onChange={e => { setConfirmPassword(e.target.value); setErrors(p => ({ ...p, confirmPassword: '' })) }}
+                placeholder="Re-enter your password"
+                style={{ ...inputStyle, paddingRight: 40, borderColor: errors.confirmPassword ? 'var(--danger)' : 'var(--border)' }}
+                onFocus={e => e.target.style.borderColor = '#4C9AFF'}
+                onBlur={e => e.target.style.borderColor = errors.confirmPassword ? 'var(--danger)' : 'var(--border)'}
+              />
+              <button type="button" onClick={() => setShowConfirm(s => !s)}
+                style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: 15 }}>
+                {showConfirm ? '🙈' : '👁'}
+              </button>
+            </div>
+          </Field>
+
           <Field label="Designation / Job Title">
-            <input type="text" value={designation} onChange={e => setDesignation(e.target.value)}
+            <input
+              type="text"
+              autoComplete="off"
+              value={designation}
+              onChange={e => setDesignation(e.target.value)}
               placeholder="e.g. Bar Manager, IT Technician"
               style={inputStyle}
               onFocus={e => e.target.style.borderColor = '#4C9AFF'}
@@ -213,6 +252,39 @@ export default function CreateUserPage() {
             </SelectWrap>
           </Field>
 
+          {/* Account Status */}
+          <div style={{ marginBottom: 20 }}>
+            <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: 'var(--text)', marginBottom: 8 }}>
+              Account Status
+            </label>
+            <div style={{ display: 'flex', gap: 12 }}>
+              {[
+                { val: true,  label: 'Active',   color: '#006644', bg: '#E3FCEF' },
+                { val: false, label: 'Inactive',  color: '#BF2600', bg: '#FFEBE6' },
+              ].map(opt => (
+                <label key={String(opt.val)} style={{
+                  display: 'flex', alignItems: 'center', gap: 8,
+                  padding: '8px 16px',
+                  border: '1.5px solid ' + (isActive === opt.val ? opt.color : 'var(--border)'),
+                  borderRadius: 4, cursor: 'pointer',
+                  background: isActive === opt.val ? opt.bg : '#fff',
+                  fontSize: 13, fontWeight: 500,
+                  color: isActive === opt.val ? opt.color : 'var(--text-muted)',
+                  transition: 'all .15s',
+                }}>
+                  <input
+                    type="radio"
+                    name="isActive"
+                    checked={isActive === opt.val}
+                    onChange={() => setIsActive(opt.val)}
+                    style={{ accentColor: opt.color }}
+                  />
+                  {opt.label}
+                </label>
+              ))}
+            </div>
+          </div>
+
           {/* Departments — searchable list */}
           <div style={{ marginBottom: 20 }}>
             <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: 'var(--text)', marginBottom: 8 }}>
@@ -224,17 +296,14 @@ export default function CreateUserPage() {
               )}
             </label>
 
-            {/* Search input */}
             <div style={{ position: 'relative', marginBottom: 8 }}>
               <input
                 type="text"
+                autoComplete="off"
                 placeholder="Search departments…"
                 value={deptSearch}
                 onChange={e => setDeptSearch(e.target.value)}
-                style={{
-                  ...inputStyle,
-                  paddingLeft: 32,
-                }}
+                style={{ ...inputStyle, paddingLeft: 32 }}
                 onFocus={e => e.target.style.borderColor = '#4C9AFF'}
                 onBlur={e => e.target.style.borderColor = 'var(--border)'}
               />
@@ -244,12 +313,7 @@ export default function CreateUserPage() {
               </svg>
             </div>
 
-            {/* Scrollable department list */}
-            <div style={{
-              border: '1.5px solid var(--border)', borderRadius: 4,
-              maxHeight: 220, overflowY: 'auto',
-              background: '#fff',
-            }}>
+            <div style={{ border: '1.5px solid var(--border)', borderRadius: 4, maxHeight: 220, overflowY: 'auto', background: '#fff' }}>
               {filteredGroups.length === 0 ? (
                 <div style={{ padding: '16px', textAlign: 'center', fontSize: 13, color: 'var(--text-faint)' }}>
                   No departments match your search
@@ -257,20 +321,16 @@ export default function CreateUserPage() {
               ) : filteredGroups.map((g, idx) => {
                 const isSelected = groupIds.includes(g.id)
                 return (
-                  <label
-                    key={g.id}
-                    style={{
-                      display: 'flex', alignItems: 'center', gap: 10,
-                      padding: '10px 14px',
-                      borderBottom: idx < filteredGroups.length - 1 ? '1px solid var(--border)' : 'none',
-                      cursor: 'pointer',
-                      background: isSelected ? '#F0F4FF' : '#fff',
-                      transition: 'background .12s',
-                    }}
+                  <label key={g.id} style={{
+                    display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px',
+                    borderBottom: idx < filteredGroups.length - 1 ? '1px solid var(--border)' : 'none',
+                    cursor: 'pointer',
+                    background: isSelected ? '#F0F4FF' : '#fff',
+                    transition: 'background .12s',
+                  }}
                     onMouseEnter={e => { if (!isSelected) e.currentTarget.style.background = 'var(--surface-2)' }}
                     onMouseLeave={e => { if (!isSelected) e.currentTarget.style.background = '#fff' }}
                   >
-                    {/* Custom checkbox */}
                     <div style={{
                       width: 16, height: 16, borderRadius: 3, flexShrink: 0,
                       border: '1.5px solid ' + (isSelected ? 'var(--brand)' : 'var(--border)'),
@@ -284,15 +344,8 @@ export default function CreateUserPage() {
                         </svg>
                       )}
                     </div>
-                    <input type="checkbox" checked={isSelected} onChange={() => toggleGroup(g.id)}
-                      style={{ display: 'none' }} />
-                    {/* Icon */}
-                    <div style={{
-                      width: 28, height: 28, borderRadius: 4, flexShrink: 0,
-                      background: '#DEEBFF',
-                      display: 'flex', alignItems: 'center', justifyContent: 'center',
-                      fontSize: 15,
-                    }}>
+                    <input type="checkbox" checked={isSelected} onChange={() => toggleGroup(g.id)} style={{ display: 'none' }} />
+                    <div style={{ width: 28, height: 28, borderRadius: 4, flexShrink: 0, background: '#DEEBFF', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 15 }}>
                       {g.icon}
                     </div>
                     <div style={{ flex: 1, minWidth: 0 }}>
@@ -305,23 +358,19 @@ export default function CreateUserPage() {
                         </div>
                       )}
                     </div>
-                    <span style={{ fontSize: 11, color: 'var(--text-faint)', flexShrink: 0 }}>
-                      {g.prefix}
-                    </span>
+                    <span style={{ fontSize: 11, color: 'var(--text-faint)', flexShrink: 0 }}>{g.prefix}</span>
                   </label>
                 )
               })}
             </div>
 
-            {/* Selected summary */}
             {groupIds.length > 0 && (
               <div style={{ marginTop: 8, display: 'flex', flexWrap: 'wrap', gap: 6 }}>
                 {groups.filter(g => groupIds.includes(g.id)).map(g => (
                   <span key={g.id} style={{
                     display: 'inline-flex', alignItems: 'center', gap: 5,
                     padding: '3px 8px 3px 6px', borderRadius: 20,
-                    background: '#DEEBFF', color: 'var(--brand)',
-                    fontSize: 12, fontWeight: 500,
+                    background: '#DEEBFF', color: 'var(--brand)', fontSize: 12, fontWeight: 500,
                   }}>
                     {g.icon} {g.name}
                     <button type="button" onClick={() => toggleGroup(g.id)}
@@ -336,7 +385,6 @@ export default function CreateUserPage() {
 
           <div style={{ height: 1, background: 'var(--border)', margin: '24px -32px 24px' }} />
 
-          {/* Footer */}
           <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
             <button type="button" onClick={() => navigate('/admin/users')}
               style={{ background: 'none', border: '1.5px solid var(--border)', color: 'var(--text)', borderRadius: 4, padding: '9px 20px', fontSize: 13, fontWeight: 500, cursor: 'pointer', fontFamily: 'inherit' }}

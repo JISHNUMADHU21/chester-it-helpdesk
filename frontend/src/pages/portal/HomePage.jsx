@@ -4,8 +4,10 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useAuth } from '../../context/AuthContext'
 import { ticketsAPI } from '../../api/tickets'
 import { announcementAPI, homePageAPI } from '../../api/config'
+import AnnouncementDetailModal from '../../components/announcements/AnnouncementDetailModal'
 
 const LS_KEY = 'chester_homepage_layout'
+const MAX_HOME_ANNOUNCEMENTS = 2
 
 const STATUS_BADGES = {
   pending:     { bg: '#FFFAE6', color: '#974F0C', label: 'Pending'     },
@@ -20,43 +22,46 @@ const DOT_COLOURS = {
   highest: '#DE350B', high: '#DE350B', medium: '#FF991F', low: '#0052CC', lowest: '#0052CC',
 }
 
-// Icon background colours by prefix — fallback if no icon_image
 const ICON_BG = {
   EPOS: '#DEEBFF', IT: '#E6FCFF', ST: '#FFFAE6', CR: '#E3FCEF',
   FN: '#EAE6FF', SF: '#FFF0E0', OPS: '#FFEBE6', CRC: '#F1F2F4', CL: '#FFECF8',
+}
+
+const TAG_STYLES = {
+  maintenance: { color: '#974F0C' },
+  new_feature: { color: '#006644' },
+  update:      { color: '#0747A6' },
+  alert:       { color: '#BF2600' },
+  info:        { color: 'var(--brand)' },
 }
 
 export default function HomePage() {
   const { user }       = useAuth()
   const navigate       = useNavigate()
   const queryClient    = useQueryClient()
-  const [search, setSearch] = useState('')
+  const [search, setSearch]       = useState('')
+  const [viewTarget, setViewTarget] = useState(null)
 
-  // ── Home page layout from API ─────────────────────────────────────────────
   const { data: layoutData } = useQuery({
     queryKey: ['homepage-layout'],
     queryFn:  () => homePageAPI.get().then(r => r.data),
     staleTime: 60000,
   })
 
-  // ── Announcements from API ────────────────────────────────────────────────
   const { data: announcementsData } = useQuery({
     queryKey: ['announcements'],
     queryFn:  () => announcementAPI.list().then(r => r.data.results || r.data),
     staleTime: 60000,
   })
 
-  // ── Recent tickets ────────────────────────────────────────────────────────
   const { data: recentTickets } = useQuery({
     queryKey: ['my-tickets-recent'],
     queryFn:  () => ticketsAPI.list().then(r => (r.data.results || r.data).slice(0, 5)),
   })
 
-  // ── Cross-tab real-time sync ──────────────────────────────────────────────
   useEffect(() => {
     function onStorage(e) {
       if (e.key === LS_KEY && e.newValue) {
-        // Another tab saved a new layout — refetch
         queryClient.invalidateQueries(['homepage-layout'])
       }
     }
@@ -64,13 +69,13 @@ export default function HomePage() {
     return () => window.removeEventListener('storage', onStorage)
   }, [queryClient])
 
-  // ── Resolve tiles from layout ─────────────────────────────────────────────
-  // tiles is an array of 8 items — each is a group object or null
-  const tiles = layoutData?.tiles || []
-  // Filter to only non-null tiles for display
+  const tiles         = layoutData?.tiles || []
   const visibleGroups = tiles.filter(Boolean)
 
-  const announcements = (announcementsData || []).filter(a => a.is_active)
+  // Only show max 2 announcements on the homepage, most recent first
+  const allAnnouncements  = announcementsData || []
+  const homeAnnouncements = allAnnouncements.slice(0, MAX_HOME_ANNOUNCEMENTS)
+  const hasMoreAnnouncements = allAnnouncements.length > MAX_HOME_ANNOUNCEMENTS
 
   function handleGroupClick(group) {
     navigate('/tickets/create', {
@@ -84,14 +89,6 @@ export default function HomePage() {
         fromCard: true,
       },
     })
-  }
-
-  const TAG_STYLES = {
-    maintenance: { color: '#974F0C' },
-    new_feature: { color: '#006644' },
-    update:      { color: '#0747A6' },
-    alert:       { color: '#BF2600' },
-    info:        { color: 'var(--brand)' },
   }
 
   return (
@@ -109,7 +106,6 @@ export default function HomePage() {
           How can we help you today? Search for solutions or raise a new request below.
         </p>
 
-        {/* Search bar */}
         <div style={{ maxWidth: 560, margin: '0 auto', position: 'relative' }}>
           <input
             type="text" autoComplete="off"
@@ -148,7 +144,7 @@ export default function HomePage() {
           >+ Raise a Request</button>
         </div>
 
-        {/* ── GROUP CARDS ── driven by HomePageLayout API ── */}
+        {/* ── GROUP CARDS ── */}
         {visibleGroups.length === 0 ? (
           <div style={{ background: '#fff', border: '1px solid var(--border)', borderRadius: 8, padding: '48px 20px', textAlign: 'center', marginBottom: 40 }}>
             <div style={{ fontSize: 32, marginBottom: 10 }}>🏗️</div>
@@ -249,24 +245,53 @@ export default function HomePage() {
           </table>
         </div>
 
-        {/* ── ANNOUNCEMENTS — dynamic from API ── */}
-        {announcements.length > 0 && (
+        {/* ── ANNOUNCEMENTS — max 2 tiles, click to open full detail ── */}
+        {homeAnnouncements.length > 0 && (
           <>
-            <h2 style={{ fontSize: 18, fontWeight: 700, color: 'var(--text)', marginBottom: 16 }}>
-              Announcements
-            </h2>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
+              <h2 style={{ fontSize: 18, fontWeight: 700, color: 'var(--text)', margin: 0 }}>
+                Announcements
+              </h2>
+              {hasMoreAnnouncements && (
+                <span style={{ fontSize: 12, color: 'var(--text-faint)' }}>
+                  Showing {homeAnnouncements.length} of {allAnnouncements.length}
+                </span>
+              )}
+            </div>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
-              {announcements.map(a => {
-                const tagStyle = TAG_STYLES[a.tag] || TAG_STYLES.info
+              {homeAnnouncements.map(a => {
+                const tagStyle    = TAG_STYLES[a.tag] || TAG_STYLES.info
+                const hasAttach   = a.attachments?.length > 0
                 return (
-                  <div key={a.id} style={{ background: '#fff', border: '1px solid var(--border)', borderRadius: 8, padding: '18px 20px' }}>
+                  <div key={a.id}
+                    onClick={() => setViewTarget(a)}
+                    style={{
+                      background: '#fff', border: '1px solid var(--border)', borderRadius: 8,
+                      padding: '18px 20px', cursor: 'pointer', transition: 'box-shadow .15s, border-color .15s',
+                    }}
+                    onMouseEnter={e => { e.currentTarget.style.boxShadow = 'var(--shadow-md)'; e.currentTarget.style.borderColor = '#4C9AFF' }}
+                    onMouseLeave={e => { e.currentTarget.style.boxShadow = 'none'; e.currentTarget.style.borderColor = 'var(--border)' }}
+                  >
                     <div style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.08em', color: tagStyle.color, marginBottom: 6 }}>
                       {a.tag_display || a.tag}
                     </div>
                     <h3 style={{ fontSize: 14, fontWeight: 600, color: 'var(--text)', marginBottom: 6 }}>{a.title}</h3>
-                    <p style={{ fontSize: 12, color: 'var(--text-muted)', lineHeight: 1.5, margin: 0 }}>{a.body}</p>
-                    <div style={{ fontSize: 11, color: 'var(--text-faint)', marginTop: 8 }}>
-                      Posted {new Date(a.created_at).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}
+                    <p style={{
+                      fontSize: 12, color: 'var(--text-muted)', lineHeight: 1.5, margin: 0,
+                      overflow: 'hidden', textOverflow: 'ellipsis',
+                      display: '-webkit-box', WebkitLineClamp: 3, WebkitBoxOrient: 'vertical',
+                    }}>
+                      {a.body}
+                    </p>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 10 }}>
+                      <div style={{ fontSize: 11, color: 'var(--text-faint)' }}>
+                        Posted {new Date(a.created_at).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}
+                      </div>
+                      {hasAttach && (
+                        <span style={{ fontSize: 11, color: 'var(--brand)', fontWeight: 500 }}>
+                          📎 {a.attachments.length}
+                        </span>
+                      )}
                     </div>
                   </div>
                 )
@@ -276,6 +301,14 @@ export default function HomePage() {
         )}
 
       </main>
+
+      {/* ── ANNOUNCEMENT DETAIL MODAL ── */}
+      {viewTarget && (
+        <AnnouncementDetailModal
+          announcement={viewTarget}
+          onClose={() => setViewTarget(null)}
+        />
+      )}
     </div>
   )
 }

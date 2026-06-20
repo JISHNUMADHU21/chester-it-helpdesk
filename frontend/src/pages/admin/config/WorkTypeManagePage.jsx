@@ -2,6 +2,7 @@ import { useState, useRef } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { workTypeAPI } from '../../../api/config'
 import { groupsAPI } from '../../../api/groups'
+import { useAuth } from '../../../context/AuthContext'
 
 const inputStyle = {
   width: '100%', padding: '9px 12px', border: '1.5px solid var(--border)',
@@ -29,9 +30,204 @@ function Modal({ title, onClose, children }) {
   )
 }
 
+// ── Searchable group dropdown ─────────────────────────────────────────────────
+function GroupDropdown({ groups, selectedGroup, onSelect, placeholder = 'All Work Types' }) {
+  const [open,   setOpen]   = useState(false)
+  const [search, setSearch] = useState('')
+
+  const filtered = groups.filter(g =>
+    !search ||
+    g.name.toLowerCase().includes(search.toLowerCase()) ||
+    g.prefix.toLowerCase().includes(search.toLowerCase())
+  )
+
+  return (
+    <div style={{ position: 'relative', maxWidth: 320 }}>
+      {/* Trigger */}
+      <div
+        onClick={() => setOpen(o => !o)}
+        style={{
+          display: 'flex', alignItems: 'center', gap: 8,
+          padding: '8px 12px', border: '1.5px solid ' + (open ? '#4C9AFF' : 'var(--border)'),
+          borderRadius: 4, background: '#fff', cursor: 'pointer',
+          fontSize: 13, transition: 'border-color .15s', userSelect: 'none',
+        }}
+      >
+        {selectedGroup ? (
+          <>
+            <div style={{ width: 22, height: 22, borderRadius: 3, background: '#DEEBFF', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, flexShrink: 0, overflow: 'hidden' }}>
+              {selectedGroup.icon_image_url || selectedGroup.icon_image
+                ? <img src={selectedGroup.icon_image_url || selectedGroup.icon_image} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                : selectedGroup.icon
+              }
+            </div>
+            <span style={{ flex: 1, color: 'var(--text)', fontWeight: 500 }}>{selectedGroup.name}</span>
+          </>
+        ) : (
+          <span style={{ flex: 1, color: 'var(--text-muted)' }}>{placeholder}</span>
+        )}
+        <span style={{ fontSize: 11, color: 'var(--text-muted)', display: 'inline-block', transform: open ? 'rotate(180deg)' : 'none', transition: 'transform .15s' }}>▾</span>
+      </div>
+
+      {/* Dropdown */}
+      {open && (
+        <>
+          <div style={{ position: 'fixed', inset: 0, zIndex: 99 }} onClick={() => setOpen(false)} />
+          <div style={{
+            position: 'absolute', top: 'calc(100% + 4px)', left: 0,
+            minWidth: '100%', width: 280, background: '#fff',
+            border: '1.5px solid var(--border)', borderRadius: 6,
+            boxShadow: 'var(--shadow-md)', zIndex: 100, overflow: 'hidden',
+          }}>
+            {/* Search */}
+            <div style={{ padding: '8px 10px', borderBottom: '1px solid var(--border)', background: 'var(--surface-2)' }}>
+              <div style={{ position: 'relative' }}>
+                <input
+                  autoFocus
+                  type="text"
+                  placeholder="Search groups…"
+                  value={search}
+                  onChange={e => setSearch(e.target.value)}
+                  onClick={e => e.stopPropagation()}
+                  style={{ ...inputStyle, paddingLeft: 28, padding: '6px 10px 6px 28px', fontSize: 12 }}
+                />
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--text-faint)" strokeWidth="2"
+                  style={{ position: 'absolute', left: 8, top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none' }}>
+                  <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+                </svg>
+              </div>
+            </div>
+
+            {/* All option */}
+            <div
+              onClick={() => { onSelect(null); setOpen(false); setSearch('') }}
+              style={{
+                display: 'flex', alignItems: 'center', gap: 10, padding: '9px 12px',
+                cursor: 'pointer', fontSize: 13,
+                background: !selectedGroup ? '#F0F4FF' : 'none',
+                color: !selectedGroup ? 'var(--brand)' : 'var(--text)',
+                fontWeight: !selectedGroup ? 600 : 400,
+                borderBottom: '1px solid var(--border)',
+              }}
+              onMouseEnter={e => { if (selectedGroup) e.currentTarget.style.background = 'var(--surface-2)' }}
+              onMouseLeave={e => { if (selectedGroup) e.currentTarget.style.background = 'none' }}
+            >
+              <div style={{ width: 22, height: 22, borderRadius: 3, background: '#F1F2F4', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12 }}>🌐</div>
+              <span>{placeholder}</span>
+            </div>
+
+            {/* Group list */}
+            <div style={{ maxHeight: 220, overflowY: 'auto' }}>
+              {filtered.length === 0 ? (
+                <div style={{ padding: '16px', textAlign: 'center', fontSize: 12, color: 'var(--text-faint)' }}>No groups found</div>
+              ) : filtered.map(g => (
+                <div key={g.id}
+                  onClick={() => { onSelect(g); setOpen(false); setSearch('') }}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 10, padding: '9px 12px',
+                    cursor: 'pointer', fontSize: 13,
+                    background: selectedGroup?.id === g.id ? '#F0F4FF' : 'none',
+                    color: selectedGroup?.id === g.id ? 'var(--brand)' : 'var(--text)',
+                    fontWeight: selectedGroup?.id === g.id ? 600 : 400,
+                    borderBottom: '1px solid var(--border)',
+                  }}
+                  onMouseEnter={e => { if (selectedGroup?.id !== g.id) e.currentTarget.style.background = 'var(--surface-2)' }}
+                  onMouseLeave={e => { if (selectedGroup?.id !== g.id) e.currentTarget.style.background = 'none' }}
+                >
+                  <div style={{ width: 22, height: 22, borderRadius: 3, background: '#DEEBFF', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, flexShrink: 0, overflow: 'hidden' }}>
+                    {g.icon_image_url || g.icon_image
+                      ? <img src={g.icon_image_url || g.icon_image} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                      : g.icon
+                    }
+                  </div>
+                  <span>{g.name}</span>
+                  <span style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--text-faint)' }}>{g.prefix}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </>
+      )}
+    </div>
+  )
+}
+
+// ── Searchable group multi-select list (for assign to groups) ─────────────────
+function GroupSearchList({ groups, selectedIds, onToggle }) {
+  const [search, setSearch] = useState('')
+  const filtered = groups.filter(g =>
+    !search ||
+    g.name.toLowerCase().includes(search.toLowerCase()) ||
+    g.prefix.toLowerCase().includes(search.toLowerCase())
+  )
+  return (
+    <div>
+      <div style={{ position: 'relative', marginBottom: 8 }}>
+        <input
+          type="text" autoComplete="off"
+          placeholder="Search groups…"
+          value={search}
+          onChange={e => setSearch(e.target.value)}
+          style={{ ...inputStyle, paddingLeft: 30, fontSize: 12 }}
+          onFocus={e => e.target.style.borderColor = '#4C9AFF'}
+          onBlur={e => e.target.style.borderColor = 'var(--border)'}
+        />
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--text-faint)" strokeWidth="2"
+          style={{ position: 'absolute', left: 9, top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none' }}>
+          <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+        </svg>
+      </div>
+      <div style={{ border: '1.5px solid var(--border)', borderRadius: 4, maxHeight: 200, overflowY: 'auto', background: '#fff' }}>
+        {filtered.length === 0 ? (
+          <div style={{ padding: '12px', textAlign: 'center', fontSize: 12, color: 'var(--text-faint)' }}>No groups found</div>
+        ) : filtered.map((g, idx) => {
+          const isSel = selectedIds.includes(g.id)
+          return (
+            <label key={g.id} style={{
+              display: 'flex', alignItems: 'center', gap: 10, padding: '9px 12px',
+              borderBottom: idx < filtered.length - 1 ? '1px solid var(--border)' : 'none',
+              cursor: 'pointer', background: isSel ? '#F0F4FF' : '#fff', transition: 'background .12s',
+            }}
+              onMouseEnter={e => { if (!isSel) e.currentTarget.style.background = 'var(--surface-2)' }}
+              onMouseLeave={e => { if (!isSel) e.currentTarget.style.background = isSel ? '#F0F4FF' : '#fff' }}
+            >
+              <div style={{ width: 15, height: 15, borderRadius: 3, flexShrink: 0, border: '1.5px solid ' + (isSel ? 'var(--brand)' : 'var(--border)'), background: isSel ? 'var(--brand)' : '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'all .12s' }}>
+                {isSel && <svg width="9" height="7" viewBox="0 0 10 8" fill="none"><path d="M1 4L3.5 6.5L9 1" stroke="white" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/></svg>}
+              </div>
+              <input type="checkbox" checked={isSel} onChange={() => onToggle(g.id)} style={{ display: 'none' }} />
+              <div style={{ width: 24, height: 24, borderRadius: 3, background: '#DEEBFF', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, flexShrink: 0, overflow: 'hidden' }}>
+                {g.icon_image_url || g.icon_image
+                  ? <img src={g.icon_image_url || g.icon_image} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                  : g.icon
+                }
+              </div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 13, fontWeight: isSel ? 600 : 400, color: isSel ? 'var(--brand)' : 'var(--text)' }}>{g.name}</div>
+              </div>
+              <span style={{ fontSize: 11, color: 'var(--text-faint)', flexShrink: 0 }}>{g.prefix}</span>
+            </label>
+          )
+        })}
+      </div>
+      {/* Selected tags */}
+      {selectedIds.length > 0 && (
+        <div style={{ marginTop: 8, display: 'flex', flexWrap: 'wrap', gap: 5 }}>
+          {groups.filter(g => selectedIds.includes(g.id)).map(g => (
+            <span key={g.id} style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '2px 8px 2px 6px', borderRadius: 20, background: '#DEEBFF', color: 'var(--brand)', fontSize: 11, fontWeight: 500 }}>
+              {g.icon} {g.name}
+              <button type="button" onClick={() => onToggle(g.id)} style={{ background: 'none', border: 'none', color: 'var(--brand)', cursor: 'pointer', fontSize: 12, lineHeight: 1, padding: 0, marginLeft: 2 }}>✕</button>
+            </span>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 export default function WorkTypeManagePage() {
-  const queryClient = useQueryClient()
+  const queryClient  = useQueryClient()
   const fileInputRef = useRef(null)
+  const { isAdmin, isSuperAdmin, user } = useAuth()
 
   const [selectedGroup, setSelectedGroup] = useState(null)
   const [modal,         setModal]         = useState(null)
@@ -42,7 +238,6 @@ export default function WorkTypeManagePage() {
   const [name,         setName]         = useState('')
   const [slug,         setSlug]         = useState('')
   const [description,  setDescription]  = useState('')
-  const [order,        setOrder]        = useState(0)
   const [isActive,     setIsActive]     = useState(true)
   const [groupIds,     setGroupIds]     = useState([])
   const [iconFile,     setIconFile]     = useState(null)
@@ -55,14 +250,20 @@ export default function WorkTypeManagePage() {
     queryKey: ['groups'],
     queryFn:  () => groupsAPI.list().then(r => r.data.results),
   })
-  const groups = groupsData || []
+  const allGroups = groupsData || []
+
+  // For managers — only show their groups
+  const isManagerOnly = !isAdmin && !isSuperAdmin
+  const myGroupIds    = user?.groups?.map(g => g.id) || []
+  const visibleGroups = isManagerOnly
+    ? allGroups.filter(g => myGroupIds.includes(g.id))
+    : allGroups
 
   const { data: workTypesData, isLoading } = useQuery({
     queryKey: ['config-worktypes', selectedGroup?.id],
     queryFn:  () => selectedGroup
       ? workTypeAPI.listByGroup(selectedGroup.id).then(r => r.data.results || r.data)
       : workTypeAPI.list().then(r => r.data.results || r.data),
-    enabled: true,
   })
   const workTypes = workTypesData || []
 
@@ -70,23 +271,17 @@ export default function WorkTypeManagePage() {
     mutationFn: (formData) => selected
       ? workTypeAPI.update(selected.id, formData)
       : workTypeAPI.create(formData),
-    onSuccess: () => {
-      queryClient.invalidateQueries(['config-worktypes'])
-      closeModal()
-    },
+    onSuccess: () => { queryClient.invalidateQueries(['config-worktypes']); closeModal() },
   })
 
   const deleteMutation = useMutation({
     mutationFn: (id) => workTypeAPI.delete(id),
-    onSuccess: () => {
-      queryClient.invalidateQueries(['config-worktypes'])
-      setDeleteTarget(null)
-    },
+    onSuccess: () => { queryClient.invalidateQueries(['config-worktypes']); setDeleteTarget(null) },
   })
 
   function openCreate() {
     setSelected(null)
-    setName(''); setSlug(''); setDescription(''); setOrder(0); setIsActive(true)
+    setName(''); setSlug(''); setDescription(''); setIsActive(true)
     setGroupIds(selectedGroup ? [selectedGroup.id] : [])
     setIconFile(null); setIconPreview(null); setExistingIcon(null); setRemoveIcon(false)
     setErrors({})
@@ -96,7 +291,7 @@ export default function WorkTypeManagePage() {
   function openEdit(item) {
     setSelected(item)
     setName(item.name || ''); setSlug(item.slug || ''); setDescription(item.description || '')
-    setOrder(item.order || 0); setIsActive(item.is_active)
+    setIsActive(item.is_active)
     setGroupIds(item.groups?.map(g => g.id) || [])
     setIconFile(null); setIconPreview(null)
     setExistingIcon(item.icon_image || null); setRemoveIcon(false)
@@ -145,7 +340,6 @@ export default function WorkTypeManagePage() {
     formData.append('name',        name)
     formData.append('slug',        slug)
     formData.append('description', description)
-    formData.append('order',       order)
     formData.append('is_active',   isActive)
     groupIds.forEach(id => formData.append('group_ids', id))
     if (iconFile)        formData.append('icon_image', iconFile)
@@ -158,6 +352,11 @@ export default function WorkTypeManagePage() {
   }
 
   const displayIcon = iconPreview || (removeIcon ? null : existingIcon)
+
+  // Auto-select single group for manager in one group
+  const defaultLabel = (isManagerOnly && visibleGroups.length === 1)
+    ? visibleGroups[0].name + ' — Work Types'
+    : 'All Work Types'
 
   return (
     <div style={{ padding: '28px 32px' }}>
@@ -175,49 +374,24 @@ export default function WorkTypeManagePage() {
         >+ Create Work Type</button>
       </div>
 
-      {/* Group selector */}
+      {/* Group filter — searchable dropdown */}
       <div style={{ marginBottom: 20 }}>
         <label style={{ fontSize: 12, fontWeight: 600, color: 'var(--text)', marginBottom: 8, display: 'block' }}>
           Filter by Group
         </label>
-        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-          <button
-            onClick={() => setSelectedGroup(null)}
-            style={{
-              padding: '7px 14px', borderRadius: 20, fontSize: 13, fontWeight: 500, cursor: 'pointer',
-              border: '1.5px solid ' + (!selectedGroup ? 'var(--brand)' : 'var(--border)'),
-              background: !selectedGroup ? '#DEEBFF' : '#fff',
-              color: !selectedGroup ? 'var(--brand)' : 'var(--text-muted)',
-              fontFamily: 'inherit', transition: 'all .15s',
-            }}
-          >All Groups</button>
-          {groups.map(g => (
-            <button key={g.id}
-              onClick={() => setSelectedGroup(g)}
-              style={{
-                padding: '7px 14px', borderRadius: 20, fontSize: 13, fontWeight: 500, cursor: 'pointer',
-                border: '1.5px solid ' + (selectedGroup?.id === g.id ? 'var(--brand)' : 'var(--border)'),
-                background: selectedGroup?.id === g.id ? '#DEEBFF' : '#fff',
-                color: selectedGroup?.id === g.id ? 'var(--brand)' : 'var(--text-muted)',
-                fontFamily: 'inherit', transition: 'all .15s',
-                display: 'flex', alignItems: 'center', gap: 6,
-              }}
-            >
-              {g.icon_image
-                ? <img src={g.icon_image_url || g.icon_image} alt="" style={{ width: 16, height: 16, objectFit: 'cover', borderRadius: 2 }} />
-                : <span>{g.icon}</span>
-              }
-              {g.name}
-            </button>
-          ))}
-        </div>
+        <GroupDropdown
+          groups={visibleGroups}
+          selectedGroup={selectedGroup}
+          onSelect={setSelectedGroup}
+          placeholder={defaultLabel}
+        />
       </div>
 
       {/* Table */}
       <div style={{ background: '#fff', border: '1px solid var(--border)', borderRadius: 8, overflow: 'hidden' }}>
         <div style={{ padding: '14px 18px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <span style={{ fontSize: 14, fontWeight: 600 }}>
-            {selectedGroup ? `${selectedGroup.name} — Work Types` : 'All Work Types'}
+            {selectedGroup ? `${selectedGroup.name} — Work Types` : defaultLabel}
           </span>
           <span style={{ fontSize: 12, color: 'var(--text-muted)', background: 'var(--surface-2)', border: '1px solid var(--border)', borderRadius: 10, padding: '2px 9px' }}>
             {workTypes.length} records
@@ -275,9 +449,7 @@ export default function WorkTypeManagePage() {
                       }
                     </div>
                   </td>
-                  <td style={{ padding: '13px 18px', fontSize: 12, color: 'var(--text-muted)', maxWidth: 200 }}>
-                    {item.description || '—'}
-                  </td>
+                  <td style={{ padding: '13px 18px', fontSize: 12, color: 'var(--text-muted)', maxWidth: 200 }}>{item.description || '—'}</td>
                   <td style={{ padding: '13px 18px' }}>
                     <span style={{ fontSize: 12, fontWeight: 600, color: item.is_active ? '#006644' : '#BF2600', display: 'flex', alignItems: 'center', gap: 5 }}>
                       <span style={{ width: 7, height: 7, borderRadius: '50%', background: item.is_active ? '#36B37E' : '#FF5630', display: 'inline-block' }} />
@@ -347,8 +519,7 @@ export default function WorkTypeManagePage() {
           <div style={{ marginBottom: 16 }}>
             <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: 'var(--text)', marginBottom: 6 }}>Description</label>
             <textarea value={description} onChange={e => setDescription(e.target.value)}
-              placeholder="Describe when this work type is used"
-              rows={3}
+              placeholder="Describe when this work type is used" rows={3}
               style={{ ...inputStyle, resize: 'vertical' }}
               onFocus={e => e.target.style.borderColor = '#4C9AFF'}
               onBlur={e => e.target.style.borderColor = 'var(--border)'}
@@ -361,10 +532,7 @@ export default function WorkTypeManagePage() {
             <p style={{ fontSize: 11, color: 'var(--text-faint)', marginBottom: 8 }}>PNG, JPG, SVG or WebP. Max 1MB.</p>
             <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
               <div style={{ width: 48, height: 48, borderRadius: 6, border: '1.5px solid var(--border)', background: '#F4F5F7', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden', flexShrink: 0 }}>
-                {displayIcon
-                  ? <img src={displayIcon} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-                  : <span style={{ fontSize: 22 }}>🔧</span>
-                }
+                {displayIcon ? <img src={displayIcon} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : <span style={{ fontSize: 22 }}>🔧</span>}
               </div>
               <div style={{ display: 'flex', gap: 8 }}>
                 <button type="button" onClick={() => fileInputRef.current?.click()}
@@ -385,41 +553,19 @@ export default function WorkTypeManagePage() {
             {errors.icon && <div style={{ fontSize: 12, color: 'var(--danger)', marginTop: 6 }}>⊘ {errors.icon}</div>}
           </div>
 
-          {/* Order */}
-          <div style={{ marginBottom: 16 }}>
-            <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: 'var(--text)', marginBottom: 6 }}>Order</label>
-            <input type="number" value={order} onChange={e => setOrder(e.target.value)} min={0}
-              style={{ ...inputStyle, maxWidth: 100 }}
-              onFocus={e => e.target.style.borderColor = '#4C9AFF'}
-              onBlur={e => e.target.style.borderColor = 'var(--border)'}
-            />
-          </div>
-
-          {/* Groups */}
+          {/* Assign to Groups — searchable list */}
           <div style={{ marginBottom: 16 }}>
             <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: 'var(--text)', marginBottom: 8 }}>
               Assign to Groups
+              {groupIds.length > 0 && (
+                <span style={{ marginLeft: 6, fontSize: 11, fontWeight: 400, color: 'var(--brand)' }}>{groupIds.length} selected</span>
+              )}
             </label>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
-              {groups.map(g => {
-                const isSel = groupIds.includes(g.id)
-                return (
-                  <label key={g.id} style={{
-                    display: 'flex', alignItems: 'center', gap: 8, padding: '7px 10px',
-                    border: '1.5px solid ' + (isSel ? 'var(--brand)' : 'var(--border)'),
-                    borderRadius: 4, cursor: 'pointer',
-                    background: isSel ? '#F0F4FF' : '#fff',
-                    fontSize: 13, transition: 'all .12s',
-                  }}>
-                    <div style={{ width: 14, height: 14, borderRadius: 3, flexShrink: 0, border: '1.5px solid ' + (isSel ? 'var(--brand)' : 'var(--border)'), background: isSel ? 'var(--brand)' : '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                      {isSel && <svg width="9" height="7" viewBox="0 0 10 8" fill="none"><path d="M1 4L3.5 6.5L9 1" stroke="white" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/></svg>}
-                    </div>
-                    <input type="checkbox" checked={isSel} onChange={() => toggleGroupId(g.id)} style={{ display: 'none' }} />
-                    <span style={{ fontSize: 13 }}>{g.icon} {g.name}</span>
-                  </label>
-                )
-              })}
-            </div>
+            <GroupSearchList
+              groups={visibleGroups}
+              selectedIds={groupIds}
+              onToggle={toggleGroupId}
+            />
           </div>
 
           {/* Status */}

@@ -45,15 +45,34 @@ export const workTypeAPI = {
 export const announcementAPI = {
   list:   ()         => client.get('/config/announcements/'),
   get:    (id)       => client.get(`/config/announcements/${id}/`),
-  create: (data)     => client.post('/config/announcements/', data),
-  update: (id, data) => client.patch(`/config/announcements/${id}/`, data),
+  create: (data)     => client.post('/config/announcements/', data, {
+    headers: data instanceof FormData ? { 'Content-Type': 'multipart/form-data' } : {},
+  }),
+  update: (id, data) => client.patch(`/config/announcements/${id}/`, data, {
+    headers: data instanceof FormData ? { 'Content-Type': 'multipart/form-data' } : {},
+  }),
   delete: (id)       => client.delete(`/config/announcements/${id}/`),
+}
+
+// ── ANNOUNCEMENT ATTACHMENTS ──────────────────────────────────────────────────
+export const announcementAttachmentAPI = {
+  list:   (announcementId)             => client.get(`/config/announcements/${announcementId}/attachments/`),
+  create: (announcementId, formData)   => client.post(
+    `/config/announcements/${announcementId}/attachments/`,
+    formData,
+    { headers: { 'Content-Type': 'multipart/form-data' } },
+  ),
+  createLink: (announcementId, data)   => client.post(
+    `/config/announcements/${announcementId}/attachments/`,
+    data,
+  ),
+  delete: (announcementId, attachmentId) => client.delete(
+    `/config/announcements/${announcementId}/attachments/${attachmentId}/`,
+  ),
 }
 
 // ── HOME PAGE LAYOUT ──────────────────────────────────────────────────────────
 export const homePageAPI = {
-  // Returns { layout: [groupId|null, ...8 items], tiles: [groupObj|null, ...8 items] }
   get:    ()       => client.get('/config/homepage-layout/'),
-  // layout: array of 8 items, each is a group ID (number) or null
   update: (layout) => client.put('/config/homepage-layout/', { layout }),
 }
