@@ -1,9 +1,10 @@
 import { useState, useRef, useEffect } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
+import { useQuery } from '@tanstack/react-query'
 import { ticketsAPI } from '../../api/tickets'
 import { groupsAPI } from '../../api/groups'
+import { componentAPI, workTypeAPI, priorityAPI, urgencyAPI } from '../../api/config'
 import { useAuth } from '../../context/AuthContext'
-import { useQuery } from '@tanstack/react-query'
 
 /* ── shared styles ── */
 const S = {
@@ -58,28 +59,497 @@ function Group({ children }) {
   return <div style={{ marginBottom: 22 }}>{children}</div>
 }
 
-const DEPT_OPTIONS = [
-  { value: 'EPOS', label: '🖥️ EPOS & IT'               },
-  { value: 'NET',  label: '🌐 Networks & Connectivity'   },
-  { value: 'STK',  label: '📦 Stock'                    },
-  { value: 'CLR',  label: '🍺 Cellar'                   },
-  { value: 'MNT',  label: '🔧 Maintenance'              },
-  { value: 'RCO',  label: '🏇 Racing Operations'        },
-  { value: 'HR',   label: '💼 HR & Payroll'             },
-  { value: 'FIN',  label: '💰 Finance'                  },
-  { value: 'GEN',  label: '💬 General'                  },
-]
+const GENERAL_GROUP_NAME = 'General'
+const MAX_LABELS = 3
 
-const RT_INFO = {
-  EPOS: { icon: '🖥️', name: 'EPOS & IT Support',        desc: 'Get assistance for EPOS systems, tills, and general IT issues.'       },
-  NET:  { icon: '🌐', name: 'Network & Connectivity',    desc: 'Report Wi-Fi, broadband, VPN, or connectivity problems.'               },
-  STK:  { icon: '📦', name: 'Stock Request',             desc: 'Report delivery issues, stock discrepancies, or shortages.'            },
-  CLR:  { icon: '🍺', name: 'Cellar Support',            desc: 'Log cellar equipment faults, line pressure, or CO2 issues.'            },
-  MNT:  { icon: '🔧', name: 'Maintenance Request',       desc: 'Report building, equipment, or infrastructure faults.'                 },
-  RCO:  { icon: '🏇', name: 'Racing Operations',         desc: 'Raise issues related to race day operations and facilities.'           },
-  HR:   { icon: '💼', name: 'HR & Payroll',              desc: 'Submit HR queries, payroll issues, or onboarding requests.'            },
-  FIN:  { icon: '💰', name: 'Finance Request',           desc: 'Report finance system issues or invoice/payment queries.'              },
-  GEN:  { icon: '💬', name: 'General Enquiry',           desc: "For anything that doesn't fit another department."                    },
+function isGeneralGroup(g) {
+  return (g?.name || '').trim().toLowerCase() === GENERAL_GROUP_NAME.toLowerCase()
+}
+
+// ── Priority SVG icons — copied exactly from PriorityManagePage.jsx so the
+// Create Ticket dropdown renders pixel-identical icons to the admin page.
+// Priority has no stored emoji/text icon field — these are slug-keyed SVGs. ──
+function PriorityIcon({ slug, colour }) {
+  const s = { display: 'inline-block', flexShrink: 0 }
+  switch (slug) {
+    case 'highest':
+      return (
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" style={s}>
+          <path d="M8 2L13 7H3L8 2Z" fill={colour || '#E2483D'} />
+          <path d="M8 7L13 12H3L8 7Z" fill={colour || '#E2483D'} />
+        </svg>
+      )
+    case 'high':
+      return (
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" style={s}>
+          <path d="M8 3L13 9H3L8 3Z" fill={colour || '#E2483D'} />
+        </svg>
+      )
+    case 'medium':
+      return (
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" style={s}>
+          <rect x="2" y="5"  width="12" height="2.5" rx="1" fill={colour || '#E97F33'} />
+          <rect x="2" y="9" width="12" height="2.5" rx="1" fill={colour || '#E97F33'} />
+        </svg>
+      )
+    case 'low':
+      return (
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" style={s}>
+          <path d="M8 13L3 7H13L8 13Z" fill={colour || '#4C9AFF'} />
+        </svg>
+      )
+    case 'lowest':
+      return (
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" style={s}>
+          <path d="M8 9L3 4H13L8 9Z"   fill={colour || '#4C9AFF'} />
+          <path d="M8 14L3 9H13L8 14Z" fill={colour || '#4C9AFF'} />
+        </svg>
+      )
+    default:
+      return <span style={{ fontSize: 14 }}>—</span>
+  }
+}
+
+// ── Searchable Assignee dropdown — groups first, then users ───────────────────
+function AssigneeDropdown({ value, onSelect }) {
+  const [open,    setOpen]    = useState(false)
+  const [query,   setQuery]   = useState('')
+  const wrapRef = useRef(null)
+
+  const { data: resultsData, isFetching } = useQuery({
+    queryKey: ['assignee-search', query],
+    queryFn:  () => groupsAPI.search(query).then(r => r.data),
+    enabled:  open,
+  })
+  const results = resultsData || []
+  const groupResults = results.filter(r => r.type === 'group')
+  const userResults  = results.filter(r => r.type === 'user')
+
+  useEffect(() => {
+    function handleOutside(e) {
+      if (wrapRef.current && !wrapRef.current.contains(e.target)) {
+        setOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', handleOutside)
+    return () => document.removeEventListener('mousedown', handleOutside)
+  }, [])
+
+  function handlePick(item) {
+    onSelect(item)
+    setOpen(false)
+    setQuery('')
+  }
+
+  function renderAvatar(item, size) {
+    const dim = size || 28
+    if (item.type === 'group') {
+      return (
+        <div style={{
+          width: dim, height: dim, borderRadius: 6, background: '#DEEBFF',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          fontSize: dim * 0.55, flexShrink: 0, overflow: 'hidden',
+        }}>
+          {item.icon_image_url
+            ? <img src={item.icon_image_url} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+            : (item.icon || '👥')
+          }
+        </div>
+      )
+    }
+    if (item.avatar) {
+      return (
+        <div style={{ width: dim, height: dim, borderRadius: '50%', overflow: 'hidden', flexShrink: 0 }}>
+          <img src={item.avatar} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+        </div>
+      )
+    }
+    const initials = (item.name || '?')
+      .split(' ')
+      .map(p => p[0])
+      .slice(0, 2)
+      .join('')
+      .toUpperCase()
+    return (
+      <div style={{
+        width: dim, height: dim, borderRadius: '50%', background: '#EAE6FF', color: '#403294',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        fontSize: dim * 0.4, fontWeight: 700, flexShrink: 0,
+      }}>{initials}</div>
+    )
+  }
+
+  return (
+    <div ref={wrapRef} style={{ position: 'relative' }}>
+      <div onClick={() => setOpen(o => !o)}
+        style={{
+          display: 'flex', alignItems: 'center', gap: 10,
+          border: '1.5px solid ' + (open ? '#4C9AFF' : 'var(--border)'),
+          borderRadius: 4, padding: '9px 12px', background: '#fff',
+          cursor: 'pointer', transition: 'border-color .15s',
+        }}
+      >
+        {value ? (
+          <>
+            {renderAvatar(value)}
+            <span style={{ fontSize: 13, color: 'var(--text)', flex: 1 }}>
+              {value.name}
+              <span style={{ fontSize: 11, color: 'var(--text-faint)', marginLeft: 6 }}>
+                {value.type === 'group' ? '(Group)' : '(Person)'}
+              </span>
+            </span>
+          </>
+        ) : (
+          <span style={{ fontSize: 13, color: 'var(--text-muted)', flex: 1 }}>Search groups or people…</span>
+        )}
+        <span style={{ color: 'var(--text-faint)', fontSize: 12 }}>▾</span>
+      </div>
+
+      {open && (
+        <div style={{
+          position: 'absolute', top: 'calc(100% + 4px)', left: 0, right: 0,
+          border: '1.5px solid var(--border)', borderRadius: 4, background: '#fff',
+          zIndex: 100, boxShadow: 'var(--shadow-md)', overflow: 'hidden',
+        }}>
+          <div style={{ padding: '8px 10px', borderBottom: '1px solid var(--border)', background: 'var(--surface-2)' }}>
+            <input
+              autoFocus
+              type="text"
+              placeholder="Type a name or group…"
+              value={query}
+              onChange={e => setQuery(e.target.value)}
+              style={{ ...S.input, fontSize: 12, padding: '6px 10px' }}
+            />
+          </div>
+
+          <div style={{ maxHeight: 280, overflowY: 'auto' }}>
+            {isFetching ? (
+              <div style={{ padding: '16px', textAlign: 'center', fontSize: 12, color: 'var(--text-faint)' }}>Searching…</div>
+            ) : results.length === 0 ? (
+              <div style={{ padding: '16px', textAlign: 'center', fontSize: 12, color: 'var(--text-faint)' }}>No matches found</div>
+            ) : (
+              <>
+                {groupResults.length > 0 && (
+                  <div style={{ padding: '6px 12px 2px', fontSize: 10, fontWeight: 700, color: 'var(--text-faint)', textTransform: 'uppercase', letterSpacing: '.05em' }}>
+                    Groups
+                  </div>
+                )}
+                {groupResults.map(g => (
+                  <div key={'group-' + g.id} onClick={() => handlePick(g)}
+                    style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 12px', cursor: 'pointer', borderBottom: '1px solid var(--border)' }}
+                    onMouseEnter={e => e.currentTarget.style.background = 'var(--surface-2)'}
+                    onMouseLeave={e => e.currentTarget.style.background = 'none'}
+                  >
+                    {renderAvatar(g, 26)}
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 13, fontWeight: 500, color: 'var(--text)' }}>{g.name}</div>
+                      {g.description && (
+                        <div style={{ fontSize: 11, color: 'var(--text-faint)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{g.description}</div>
+                      )}
+                    </div>
+                    <span style={{ fontSize: 11, color: 'var(--text-faint)' }}>{g.prefix}</span>
+                  </div>
+                ))}
+
+                {userResults.length > 0 && (
+                  <div style={{ padding: '6px 12px 2px', fontSize: 10, fontWeight: 700, color: 'var(--text-faint)', textTransform: 'uppercase', letterSpacing: '.05em' }}>
+                    People
+                  </div>
+                )}
+                {userResults.map(u => (
+                  <div key={'user-' + u.id} onClick={() => handlePick(u)}
+                    style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 12px', cursor: 'pointer', borderBottom: '1px solid var(--border)' }}
+                    onMouseEnter={e => e.currentTarget.style.background = 'var(--surface-2)'}
+                    onMouseLeave={e => e.currentTarget.style.background = 'none'}
+                  >
+                    {renderAvatar(u, 26)}
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 13, fontWeight: 500, color: 'var(--text)' }}>{u.name}</div>
+                      {u.designation && (
+                        <div style={{ fontSize: 11, color: 'var(--text-faint)' }}>{u.designation}</div>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── Priority dropdown — custom-styled to match Priority Management's
+// icons and colours exactly (native <option> elements cannot reliably
+// render custom SVG icons or text colour across browsers). ──
+function PriorityDropdown({ priorities, value, onSelect }) {
+  const [open, setOpen] = useState(false)
+  const wrapRef = useRef(null)
+
+  useEffect(() => {
+    function handleOutside(e) {
+      if (wrapRef.current && !wrapRef.current.contains(e.target)) {
+        setOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', handleOutside)
+    return () => document.removeEventListener('mousedown', handleOutside)
+  }, [])
+
+  const selected = priorities.find(p => p.slug === value) || null
+
+  function handlePick(p) {
+    onSelect(p.slug)
+    setOpen(false)
+  }
+
+  return (
+    <div ref={wrapRef} style={{ position: 'relative' }}>
+      <div onClick={() => setOpen(o => !o)}
+        style={{
+          display: 'flex', alignItems: 'center', gap: 8,
+          border: '1.5px solid ' + (open ? '#4C9AFF' : 'var(--border)'),
+          borderRadius: 4, padding: '9px 12px', background: '#fff',
+          cursor: 'pointer', transition: 'border-color .15s',
+        }}
+      >
+        {selected ? (
+          <>
+            <PriorityIcon slug={selected.slug} colour={selected.colour_hex} />
+            <span style={{ fontSize: 13, fontWeight: 600, color: selected.colour_hex || 'var(--text)', flex: 1 }}>
+              {selected.name}
+            </span>
+          </>
+        ) : (
+          <span style={{ fontSize: 13, color: 'var(--text-muted)', flex: 1 }}>Select Priority</span>
+        )}
+        <span style={{ color: 'var(--text-faint)', fontSize: 12 }}>▾</span>
+      </div>
+
+      {open && (
+        <div style={{
+          position: 'absolute', top: 'calc(100% + 4px)', left: 0, right: 0,
+          border: '1.5px solid var(--border)', borderRadius: 4, background: '#fff',
+          zIndex: 100, boxShadow: 'var(--shadow-md)', overflow: 'hidden',
+        }}>
+          {priorities.length === 0 ? (
+            <div style={{ padding: '16px', textAlign: 'center', fontSize: 12, color: 'var(--text-faint)' }}>No priorities configured</div>
+          ) : priorities.map((p, idx) => (
+            <div key={p.id} onClick={() => handlePick(p)}
+              style={{
+                display: 'flex', alignItems: 'center', gap: 8, padding: '9px 12px',
+                cursor: 'pointer', borderBottom: idx < priorities.length - 1 ? '1px solid var(--border)' : 'none',
+                background: value === p.slug ? 'var(--surface-2)' : '#fff',
+              }}
+              onMouseEnter={e => e.currentTarget.style.background = 'var(--surface-2)'}
+              onMouseLeave={e => e.currentTarget.style.background = value === p.slug ? 'var(--surface-2)' : '#fff'}
+            >
+              <PriorityIcon slug={p.slug} colour={p.colour_hex} />
+              <span style={{ fontSize: 13, fontWeight: 600, color: p.colour_hex || 'var(--text)' }}>
+                {p.name}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── Urgency dropdown — custom-styled to match Urgency Management's
+// background/text/border colour pill exactly. ──
+function UrgencyDropdown({ urgencies, value, onSelect }) {
+  const [open, setOpen] = useState(false)
+  const wrapRef = useRef(null)
+
+  useEffect(() => {
+    function handleOutside(e) {
+      if (wrapRef.current && !wrapRef.current.contains(e.target)) {
+        setOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', handleOutside)
+    return () => document.removeEventListener('mousedown', handleOutside)
+  }, [])
+
+  const selected = urgencies.find(u => u.slug === value) || null
+
+  function handlePick(u) {
+    onSelect(u.slug)
+    setOpen(false)
+  }
+
+  return (
+    <div ref={wrapRef} style={{ position: 'relative' }}>
+      <div onClick={() => setOpen(o => !o)}
+        style={{
+          display: 'flex', alignItems: 'center', gap: 8,
+          border: '1.5px solid ' + (open ? '#4C9AFF' : 'var(--border)'),
+          borderRadius: 4, padding: '9px 12px', background: '#fff',
+          cursor: 'pointer', transition: 'border-color .15s',
+        }}
+      >
+        {selected ? (
+          <span style={{
+            display: 'inline-flex', padding: '3px 10px', borderRadius: 20, fontSize: 12, fontWeight: 600,
+            background: selected.colour_hex, color: selected.text_colour,
+            border: `1.5px solid ${selected.border_hex}`,
+          }}>
+            {selected.name}
+          </span>
+        ) : (
+          <span style={{ fontSize: 13, color: 'var(--text-muted)', flex: 1 }}>Select Urgency</span>
+        )}
+        <span style={{ color: 'var(--text-faint)', fontSize: 12, marginLeft: 'auto' }}>▾</span>
+      </div>
+
+      {open && (
+        <div style={{
+          position: 'absolute', top: 'calc(100% + 4px)', left: 0, right: 0,
+          border: '1.5px solid var(--border)', borderRadius: 4, background: '#fff',
+          zIndex: 100, boxShadow: 'var(--shadow-md)', overflow: 'hidden',
+        }}>
+          {urgencies.length === 0 ? (
+            <div style={{ padding: '16px', textAlign: 'center', fontSize: 12, color: 'var(--text-faint)' }}>No urgency levels configured</div>
+          ) : urgencies.map((u, idx) => (
+            <div key={u.id} onClick={() => handlePick(u)}
+              style={{
+                display: 'flex', alignItems: 'center', padding: '9px 12px',
+                cursor: 'pointer', borderBottom: idx < urgencies.length - 1 ? '1px solid var(--border)' : 'none',
+                background: value === u.slug ? 'var(--surface-2)' : '#fff',
+              }}
+              onMouseEnter={e => e.currentTarget.style.background = 'var(--surface-2)'}
+              onMouseLeave={e => e.currentTarget.style.background = value === u.slug ? 'var(--surface-2)' : '#fff'}
+            >
+              <span style={{
+                display: 'inline-flex', padding: '3px 10px', borderRadius: 20, fontSize: 12, fontWeight: 600,
+                background: u.colour_hex, color: u.text_colour,
+                border: `1.5px solid ${u.border_hex}`,
+              }}>
+                {u.name}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── Labels multi-select — colour-pill style matching Label Management,
+// max 3 selectable (frontend cap; backend also enforces this on save). ──
+function LabelsMultiSelect({ labels, selectedIds, onToggle, disabled }) {
+  const [open, setOpen] = useState(false)
+  const wrapRef = useRef(null)
+
+  useEffect(() => {
+    function handleOutside(e) {
+      if (wrapRef.current && !wrapRef.current.contains(e.target)) {
+        setOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', handleOutside)
+    return () => document.removeEventListener('mousedown', handleOutside)
+  }, [])
+
+  const selectedLabels = labels.filter(l => selectedIds.includes(l.id))
+  const atMax = selectedIds.length >= MAX_LABELS
+
+  function handleToggle(label) {
+    const isSelected = selectedIds.includes(label.id)
+    if (!isSelected && atMax) return
+    onToggle(label.id)
+  }
+
+  return (
+    <div ref={wrapRef} style={{ position: 'relative' }}>
+      <div
+        onClick={() => { if (!disabled) setOpen(o => !o) }}
+        style={{
+          display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap',
+          minHeight: 38,
+          border: '1.5px solid ' + (open ? '#4C9AFF' : 'var(--border)'),
+          borderRadius: 4, padding: '7px 12px', background: disabled ? 'var(--surface-2)' : '#fff',
+          cursor: disabled ? 'not-allowed' : 'pointer', transition: 'border-color .15s',
+        }}
+      >
+        {selectedLabels.length === 0 ? (
+          <span style={{ fontSize: 13, color: 'var(--text-muted)', flex: 1 }}>
+            {disabled ? 'Select a request type first' : 'Select up to 3 labels'}
+          </span>
+        ) : (
+          <>
+            {selectedLabels.map(l => (
+              <span key={l.id} style={{
+                display: 'inline-flex', alignItems: 'center', gap: 4,
+                padding: '2px 8px 2px 8px', borderRadius: 20, fontSize: 12, fontWeight: 600,
+                background: (l.colour_hex || '#0052CC') + '22', color: l.colour_hex || '#0052CC',
+              }}>
+                {l.name}
+                <button type="button"
+                  onClick={(e) => { e.stopPropagation(); onToggle(l.id) }}
+                  style={{ background: 'none', border: 'none', color: l.colour_hex || '#0052CC', cursor: 'pointer', fontSize: 11, lineHeight: 1, padding: 0, marginLeft: 2 }}
+                >✕</button>
+              </span>
+            ))}
+            <span style={{ flex: 1 }} />
+          </>
+        )}
+        <span style={{ color: 'var(--text-faint)', fontSize: 12 }}>▾</span>
+      </div>
+
+      {open && !disabled && (
+        <div style={{
+          position: 'absolute', top: 'calc(100% + 4px)', left: 0, right: 0,
+          border: '1.5px solid var(--border)', borderRadius: 4, background: '#fff',
+          zIndex: 100, boxShadow: 'var(--shadow-md)', overflow: 'hidden',
+        }}>
+          {atMax && (
+            <div style={{ padding: '8px 12px', fontSize: 11, color: 'var(--text-faint)', background: 'var(--surface-2)', borderBottom: '1px solid var(--border)' }}>
+              Maximum of {MAX_LABELS} labels reached
+            </div>
+          )}
+          <div style={{ maxHeight: 220, overflowY: 'auto' }}>
+            {labels.length === 0 ? (
+              <div style={{ padding: '16px', textAlign: 'center', fontSize: 12, color: 'var(--text-faint)' }}>No labels configured</div>
+            ) : labels.map((l, idx) => {
+              const isSel = selectedIds.includes(l.id)
+              const isDisabled = !isSel && atMax
+              return (
+                <div key={l.id} onClick={() => handleToggle(l)}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 8, padding: '9px 12px',
+                    cursor: isDisabled ? 'not-allowed' : 'pointer',
+                    borderBottom: idx < labels.length - 1 ? '1px solid var(--border)' : 'none',
+                    background: isSel ? 'var(--surface-2)' : '#fff',
+                    opacity: isDisabled ? 0.45 : 1,
+                  }}
+                  onMouseEnter={e => { if (!isDisabled) e.currentTarget.style.background = 'var(--surface-2)' }}
+                  onMouseLeave={e => e.currentTarget.style.background = isSel ? 'var(--surface-2)' : '#fff'}
+                >
+                  <div style={{
+                    width: 15, height: 15, borderRadius: 3, flexShrink: 0,
+                    border: '1.5px solid ' + (isSel ? 'var(--brand)' : 'var(--border)'),
+                    background: isSel ? 'var(--brand)' : '#fff',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  }}>
+                    {isSel && <svg width="9" height="7" viewBox="0 0 10 8" fill="none"><path d="M1 4L3.5 6.5L9 1" stroke="white" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/></svg>}
+                  </div>
+                  <span style={{
+                    display: 'inline-flex', padding: '2px 9px', borderRadius: 20, fontSize: 12, fontWeight: 600,
+                    background: (l.colour_hex || '#0052CC') + '22', color: l.colour_hex || '#0052CC',
+                  }}>
+                    {l.name}
+                  </span>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      )}
+    </div>
+  )
 }
 
 export default function CreateTicketPage() {
@@ -90,9 +560,23 @@ export default function CreateTicketPage() {
   const fromCard    = location.state?.fromCard    || false
   const lockedGroup = location.state?.lockedGroup || null
 
+  // ── Assignee (new — replaces both the old hardcoded department select
+  // and the old fake agent picker) ──
+  const [assignee, setAssignee] = useState(
+    lockedGroup ? { type: 'group', id: lockedGroup.id, name: lockedGroup.name, icon: lockedGroup.icon, prefix: lockedGroup.prefix, description: lockedGroup.description } : null
+  )
+
+  // ── Request Type — the resolved group driving the rest of the form ──
+  // Holds the currently SELECTED group object (id, name, icon, icon_image_url, description).
+  const [requestTypeGroup,   setRequestTypeGroup]   = useState(null)
+  // When the assignee is a person with multiple eligible (non-General) groups,
+  // this holds the full list so the user can switch via a dropdown.
+  const [requestTypeOptions, setRequestTypeOptions] = useState([])
+  const [requestTypeOpen,    setRequestTypeOpen]    = useState(false)
+  const requestTypeRef = useRef(null)
+
   // field state
-  const [dept,          setDept]          = useState(lockedGroup?.prefix || '')
-  const [workType,      setWorkType]       = useState('service_request')
+  const [workType,      setWorkType]       = useState('')
   const [summary,       setSummary]        = useState('')
   const [component,     setComponent]      = useState('')
   const [files,         setFiles]          = useState([])
@@ -101,48 +585,147 @@ export default function CreateTicketPage() {
   const [description,   setDescription]    = useState('')
   const [linkType,      setLinkType]       = useState('blocks')
   const [linkedTicket,  setLinkedTicket]   = useState('')
-  const [agentAssignee, setAgentAssignee]  = useState('automatic')
-  const [agentOpen,     setAgentOpen]      = useState(false)
-  const [priority,      setPriority]       = useState('medium')
-  const [label,         setLabel]          = useState('')
+  const [priority,      setPriority]       = useState('')
+  const [labelIds,      setLabelIds]       = useState([])
   const [urgency,       setUrgency]        = useState('')
   const [createAnother, setCreateAnother]  = useState(false)
   const [errors,        setErrors]         = useState({})
   const [loading,       setLoading]        = useState(false)
 
   const fileInputRef = useRef(null)
-  const agentRef     = useRef(null)
 
-  // fetch groups for mapping dept prefix → group id
-  const { data: groupsData } = useQuery({
-    queryKey: ['groups'],
-    queryFn:  () => groupsAPI.list().then(r => r.data.results),
-  })
-  const groups = groupsData || []
-
-  // close agent dropdown on outside click
+  // ── Resolve Request Type whenever Assignee changes ──
   useEffect(() => {
-    function h(e) { if (agentRef.current && !agentRef.current.contains(e.target)) setAgentOpen(false) }
+    if (!assignee) {
+      setRequestTypeGroup(null)
+      setRequestTypeOptions([])
+      return
+    }
+
+    if (assignee.type === 'group') {
+      // Assignee IS a group — Request Type mirrors it directly (General included).
+      const groupAsRequestType = {
+        id:             assignee.id,
+        name:           assignee.name,
+        icon:           assignee.icon,
+        icon_image_url: assignee.icon_image_url,
+        prefix:         assignee.prefix,
+        description:    assignee.description,
+      }
+      setRequestTypeOptions([groupAsRequestType])
+      setRequestTypeGroup(groupAsRequestType)
+      return
+    }
+
+    // Assignee is a person — derive eligible groups (active, excluding General)
+    const eligible = (assignee.groups || []).filter(g => !isGeneralGroup(g))
+    setRequestTypeOptions(eligible)
+    setRequestTypeGroup(eligible.length > 0 ? eligible[0] : null)
+  }, [assignee])
+
+  // close Request Type dropdown on outside click
+  useEffect(() => {
+    function h(e) { if (requestTypeRef.current && !requestTypeRef.current.contains(e.target)) setRequestTypeOpen(false) }
     document.addEventListener('mousedown', h)
     return () => document.removeEventListener('mousedown', h)
   }, [])
 
+  // Fetch components scoped to the resolved Request Type group — ACTIVE
+  // ONLY, so anything the admin has marked inactive never appears here.
+  const { data: componentsData } = useQuery({
+    queryKey: ['components-for-group', requestTypeGroup?.id],
+    queryFn:  () => componentAPI.listActiveByGroup(requestTypeGroup.id).then(r => r.data.results || r.data),
+    enabled:  Boolean(requestTypeGroup?.id),
+  })
+  const availableComponents = componentsData || []
+
+  // Fetch work types scoped to the resolved Request Type group — ACTIVE
+  // ONLY, same reasoning as Components above.
+  // NOTE: Ticket.work_type is currently a plain string field (interim —
+  // a dedicated FK migration to configuration.WorkType is planned as a
+  // separate task). For now we submit the selected WorkType's slug into
+  // that string field, same approach as Components.
+  const { data: workTypesData } = useQuery({
+    queryKey: ['worktypes-for-group', requestTypeGroup?.id],
+    queryFn:  () => workTypeAPI.listActiveByGroup(requestTypeGroup.id).then(r => r.data.results || r.data),
+    enabled:  Boolean(requestTypeGroup?.id),
+  })
+  const availableWorkTypes = workTypesData || []
+
+  // Fetch Priority options — global, not group-scoped, ACTIVE ONLY.
+  // NOTE: Ticket.priority is currently a plain string field (same interim
+  // approach as Work Type / Components — submits the selected Priority's
+  // slug into that string field).
+  const { data: prioritiesData } = useQuery({
+    queryKey: ['priorities-active'],
+    queryFn:  () => priorityAPI.listActive().then(r => r.data.results || r.data),
+  })
+  const availablePriorities = prioritiesData || []
+
+  // Fetch Urgency options — global, not group-scoped, ACTIVE ONLY.
+  // NOTE: Ticket.urgency is currently a plain string field (same interim
+  // approach as Priority — submits the selected Urgency's slug into that
+  // string field).
+  const { data: urgenciesData } = useQuery({
+    queryKey: ['urgencies-active'],
+    queryFn:  () => urgencyAPI.listActive().then(r => r.data.results || r.data),
+  })
+  const availableUrgencies = urgenciesData || []
+
+  // Fetch Labels scoped to the resolved Request Type group — ACTIVE ONLY.
+  // Labels are a real M2M (TicketLabel) already, so label_ids submit
+  // directly — no interim slug workaround needed here.
+  const { data: labelsData } = useQuery({
+    queryKey: ['labels-for-group', requestTypeGroup?.id],
+    queryFn:  () => ticketsAPI.listActiveLabelsByGroup(requestTypeGroup.id).then(r => r.data.results || r.data),
+    enabled:  Boolean(requestTypeGroup?.id),
+  })
+  const availableLabels = labelsData || []
+
+  // Reset selected component/work type/labels whenever the resolved group changes
+  useEffect(() => {
+    setComponent('')
+    setWorkType('')
+    setLabelIds([])
+  }, [requestTypeGroup?.id])
+
+  // Auto-select the work type marked as default for this group, if any,
+  // once the list loads (mirrors how a sensible default should appear
+  // without forcing the user to always pick manually).
+  useEffect(() => {
+    if (!workType && availableWorkTypes.length > 0) {
+      const defaultWt = availableWorkTypes.find(wt => wt.is_default) || availableWorkTypes[0]
+      setWorkType(defaultWt.slug)
+    }
+  }, [availableWorkTypes, workType])
+
+  // Default Priority to "Lowest" specifically (per requirement), falling
+  // back to the first available priority only if "lowest" doesn't exist
+  // in the admin-configured list at all.
+  useEffect(() => {
+    if (!priority && availablePriorities.length > 0) {
+      const lowestPriority = availablePriorities.find(p => p.slug === 'lowest') || availablePriorities[0]
+      setPriority(lowestPriority.slug)
+    }
+  }, [availablePriorities, priority])
+
   function addFiles(f) { setFiles(p => [...p, ...Array.from(f)]) }
   function removeFile(i) { setFiles(p => p.filter((_, idx) => idx !== i)) }
 
-  const AGENTS = [
-    { value: 'automatic', label: 'Automatic', icon: '⚙',  bg: '#DEEBFF', color: '#0747A6', isAuto: true },
-    { value: 'tw',        label: 'Tom Williams', initials: 'TW', bg: '#DEEBFF', color: '#0747A6' },
-    { value: 'mp',        label: 'Mike Patel',   initials: 'MP', bg: '#E3FCEF', color: '#006644' },
-    { value: 'al',        label: 'Amy Lee',      initials: 'AL', bg: '#EAE6FF', color: '#403294' },
-    { value: 'jr',        label: 'Jane Roberts', initials: 'JR', bg: '#FFF0E0', color: '#974F0C' },
-  ]
-  const currentAgent = AGENTS.find(a => a.value === agentAssignee) || AGENTS[0]
+  function toggleLabel(id) {
+    setLabelIds(prev => {
+      if (prev.includes(id)) return prev.filter(x => x !== id)
+      if (prev.length >= MAX_LABELS) return prev
+      return [...prev, id]
+    })
+  }
 
   function validate() {
     const e = {}
-    if (!dept)           e.dept    = 'Please select a department'
-    if (!summary.trim()) e.summary = 'Summary is required'
+    if (!assignee)         e.assignee    = 'Please select an assignee'
+    if (!requestTypeGroup) e.requestType = 'Please select a request type'
+    if (!workType)          e.workType    = 'Please select a work type'
+    if (!summary.trim())   e.summary     = 'Summary is required'
     setErrors(e)
     return Object.keys(e).length === 0
   }
@@ -152,19 +735,21 @@ export default function CreateTicketPage() {
     if (!validate()) return
     setLoading(true)
     try {
-      const group = groups.find(g => g.prefix === dept)
       const payload = {
         summary, description, work_type: workType,
         priority, urgency: urgency || undefined,
         components: component || undefined,
         due_date: dueDate || undefined,
-        assigned_group_id: group?.id,
+        assigned_group_id: requestTypeGroup.id,
+        assigned_user_id: assignee.type === 'user' ? assignee.id : undefined,
+        label_ids: labelIds,
       }
       const res = await ticketsAPI.create(payload)
       if (createAnother) {
-        setDept(''); setSummary(''); setDescription(''); setComponent('')
-        setDueDate(''); setFiles([]); setLabel(''); setUrgency('')
-        setLinkType('blocks'); setLinkedTicket(''); setAgentAssignee('automatic'); setErrors({})
+        setAssignee(null); setRequestTypeGroup(null); setRequestTypeOptions([])
+        setWorkType(''); setSummary(''); setDescription(''); setComponent('')
+        setDueDate(''); setFiles([]); setLabelIds([]); setUrgency(''); setPriority('')
+        setLinkType('blocks'); setLinkedTicket(''); setErrors({})
         window.scrollTo(0, 0)
       } else {
         navigate(`/tickets/${res.data.id}`)
@@ -173,8 +758,6 @@ export default function CreateTicketPage() {
       setErrors({ submit: err.response?.data?.detail || 'Failed to create ticket.' })
     } finally { setLoading(false) }
   }
-
-  const rt = RT_INFO[dept]
 
   return (
     <div style={{ padding: '28px 32px', overflowY: 'auto', minHeight: '100%' }}>
@@ -211,7 +794,7 @@ export default function CreateTicketPage() {
       <form onSubmit={handleSubmit} noValidate>
         <div style={{ background: '#fff', border: '1px solid var(--border)', borderRadius: 8, padding: '32px 36px 28px', maxWidth: 780 }}>
 
-          {/* 1. ASSIGNEE (Department) */}
+          {/* 1. ASSIGNEE — searchable, groups + people */}
           <Group>
             <Label required>Assignee</Label>
             {fromCard ? (
@@ -219,56 +802,117 @@ export default function CreateTicketPage() {
                 {lockedGroup?.icon} {lockedGroup?.name}
               </div>
             ) : (
-              <Wrap>
-                <select value={dept} onChange={e => { setDept(e.target.value); setErrors(p => ({ ...p, dept: '' })) }}
-                  style={{ ...S.select, borderColor: errors.dept ? 'var(--danger)' : 'var(--border)' }}
-                  onFocus={focus} onBlur={e => blur(e, errors.dept)}
-                >
-                  <option value="">Select Department</option>
-                  {DEPT_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-                </select>
-              </Wrap>
+              <AssigneeDropdown
+                value={assignee}
+                onSelect={(item) => { setAssignee(item); setErrors(p => ({ ...p, assignee: '' })) }}
+              />
             )}
-            {errors.dept && <Err>{errors.dept}</Err>}
+            {errors.assignee && <Err>{errors.assignee}</Err>}
           </Group>
 
-          {/* 2. WORK TYPE */}
+          {/* 2. REQUEST TYPE — derived from Assignee; dropdown only when the
+              assignee is a person belonging to more than one eligible group */}
+          <Group>
+            <Label required hint="What's this?">Request Type</Label>
+            {requestTypeOptions.length > 1 ? (
+              <div ref={requestTypeRef} style={{ position: 'relative' }}>
+                <div
+                  onClick={() => setRequestTypeOpen(o => !o)}
+                  style={{
+                    border: '1.5px solid ' + (requestTypeOpen ? '#4C9AFF' : 'var(--border)'),
+                    borderRadius: 4, padding: '14px 16px', display: 'flex', alignItems: 'flex-start',
+                    justifyContent: 'space-between', gap: 12, background: '#fff', cursor: 'pointer',
+                    transition: 'border-color .15s',
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
+                    <div style={{ width: 36, height: 36, borderRadius: 4, background: '#DEEBFF', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18, flexShrink: 0, overflow: 'hidden' }}>
+                      {requestTypeGroup?.icon_image_url
+                        ? <img src={requestTypeGroup.icon_image_url} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                        : (requestTypeGroup?.icon || '💬')
+                      }
+                    </div>
+                    <div>
+                      <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text)' }}>{requestTypeGroup?.name}</div>
+                      {requestTypeGroup?.description && (
+                        <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2 }}>{requestTypeGroup.description}</div>
+                      )}
+                    </div>
+                  </div>
+                  <span style={{ color: 'var(--text-faint)', fontSize: 14, marginTop: 2, flexShrink: 0 }}>▾</span>
+                </div>
+                {requestTypeOpen && (
+                  <div style={{ position: 'absolute', top: 'calc(100% + 4px)', left: 0, right: 0, border: '1.5px solid var(--border)', borderRadius: 4, background: '#fff', zIndex: 100, boxShadow: 'var(--shadow-md)', overflow: 'hidden' }}>
+                    {requestTypeOptions.map(g => (
+                      <div key={g.id} onClick={() => { setRequestTypeGroup(g); setRequestTypeOpen(false) }}
+                        style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px', cursor: 'pointer', borderBottom: '1px solid var(--border)', background: requestTypeGroup?.id === g.id ? 'var(--surface-2)' : 'none' }}
+                        onMouseEnter={e => e.currentTarget.style.background = 'var(--surface-2)'}
+                        onMouseLeave={e => e.currentTarget.style.background = requestTypeGroup?.id === g.id ? 'var(--surface-2)' : 'none'}
+                      >
+                        <div style={{ width: 28, height: 28, borderRadius: 4, background: '#DEEBFF', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14, flexShrink: 0, overflow: 'hidden' }}>
+                          {g.icon_image_url
+                            ? <img src={g.icon_image_url} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                            : (g.icon || '💬')
+                          }
+                        </div>
+                        <span style={{ fontSize: 13, color: 'var(--text)' }}>{g.name}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div style={{
+                border: '1.5px solid var(--border)', borderRadius: 4,
+                padding: '14px 16px', display: 'flex', alignItems: 'flex-start',
+                justifyContent: 'space-between', gap: 12, background: '#fff', cursor: 'default',
+              }}>
+                <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
+                  <div style={{ width: 36, height: 36, borderRadius: 4, background: '#DEEBFF', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18, flexShrink: 0, overflow: 'hidden' }}>
+                    {requestTypeGroup?.icon_image_url
+                      ? <img src={requestTypeGroup.icon_image_url} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                      : (requestTypeGroup ? (requestTypeGroup.icon || '💬') : '💬')
+                    }
+                  </div>
+                  <div>
+                    <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text)' }}>
+                      {requestTypeGroup ? requestTypeGroup.name : <span style={{ color: 'var(--text-faint)', fontStyle: 'italic' }}>Select an assignee above</span>}
+                    </div>
+                    {requestTypeGroup?.description && (
+                      <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2 }}>{requestTypeGroup.description}</div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
+            {errors.requestType && <Err>{errors.requestType}</Err>}
+          </Group>
+
+          {/* 3. WORK TYPE — dynamic, scoped to the resolved Request Type group */}
           <Group>
             <Label required>Work Type</Label>
             <Wrap>
-              <select value={workType} onChange={e => setWorkType(e.target.value)}
-                style={S.select} onFocus={focus} onBlur={blur}
+              <select
+                value={workType}
+                onChange={e => setWorkType(e.target.value)}
+                disabled={!requestTypeGroup}
+                style={{ ...S.select, ...(!requestTypeGroup ? { color: 'var(--text-faint)', cursor: 'not-allowed' } : {}), borderColor: errors.workType ? 'var(--danger)' : 'var(--border)' }}
+                onFocus={focus} onBlur={e => blur(e, errors.workType)}
               >
-                <option value="service_request">☑ Service Request</option>
-                <option value="incident">⚠️ Incident</option>
-                <option value="problem">🔴 Problem</option>
-                <option value="change_request">🔄 Change Request</option>
+                <option value="">
+                  {!requestTypeGroup ? 'Select a request type first' : 'Select Work Type'}
+                </option>
+                {availableWorkTypes.map(wt => (
+                  <option key={wt.id} value={wt.slug}>{wt.icon ? wt.icon + ' ' : ''}{wt.name}</option>
+                ))}
               </select>
             </Wrap>
-          </Group>
-
-          {/* 3. REQUEST TYPE (card) */}
-          <Group>
-            <Label required hint="What's this?">Request Type</Label>
-            <div style={{
-              border: '1.5px solid var(--border)', borderRadius: 4,
-              padding: '14px 16px', display: 'flex', alignItems: 'flex-start',
-              justifyContent: 'space-between', gap: 12, background: '#fff', cursor: 'default',
-              transition: 'border-color .15s',
-            }}>
-              <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
-                <div style={{ width: 36, height: 36, borderRadius: 4, background: '#DEEBFF', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18, flexShrink: 0 }}>
-                  {rt ? rt.icon : '💬'}
-                </div>
-                <div>
-                  <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text)' }}>
-                    {rt ? rt.name : <span style={{ color: 'var(--text-faint)', fontStyle: 'italic' }}>Select a department above</span>}
-                  </div>
-                  {rt && <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2 }}>{rt.desc}</div>}
-                </div>
-              </div>
-              <span style={{ color: 'var(--text-faint)', fontSize: 14, marginTop: 2, flexShrink: 0 }}>▾</span>
-            </div>
+            {requestTypeGroup && availableWorkTypes.length === 0 && (
+              <p style={{ fontSize: 11, color: 'var(--text-faint)', marginTop: 5 }}>
+                No work types configured for this request type yet.
+              </p>
+            )}
+            {errors.workType && <Err>{errors.workType}</Err>}
           </Group>
 
           {/* 4. SUMMARY */}
@@ -282,22 +926,30 @@ export default function CreateTicketPage() {
             {errors.summary && <Err>{errors.summary}</Err>}
           </Group>
 
-          {/* 5. COMPONENTS */}
+          {/* 5. COMPONENTS — dynamic, scoped to the resolved Request Type group */}
           <Group>
             <Label>Components</Label>
             <Wrap>
-              <select value={component} onChange={e => setComponent(e.target.value)}
-                style={S.select} onFocus={focus} onBlur={blur}
+              <select
+                value={component}
+                onChange={e => setComponent(e.target.value)}
+                disabled={!requestTypeGroup}
+                style={{ ...S.select, ...(!requestTypeGroup ? { color: 'var(--text-faint)', cursor: 'not-allowed' } : {}) }}
+                onFocus={focus} onBlur={blur}
               >
-                <option value="">Select Component</option>
-                <option value="hardware">Hardware</option>
-                <option value="software">Software</option>
-                <option value="network">Network</option>
-                <option value="epos">EPOS / Tills</option>
-                <option value="access">Access &amp; Permissions</option>
-                <option value="other">Other</option>
+                <option value="">
+                  {!requestTypeGroup ? 'Select a request type first' : 'Select Component'}
+                </option>
+                {availableComponents.map(c => (
+                  <option key={c.id} value={c.slug}>{c.name}</option>
+                ))}
               </select>
             </Wrap>
+            {requestTypeGroup && availableComponents.length === 0 && (
+              <p style={{ fontSize: 11, color: 'var(--text-faint)', marginTop: 5 }}>
+                No components configured for this request type yet.
+              </p>
+            )}
           </Group>
 
           {/* 6. ATTACHMENT */}
@@ -446,93 +1098,43 @@ export default function CreateTicketPage() {
             </div>
           </Group>
 
-          {/* 11. ASSIGNEE (agent) */}
-          <Group>
-            <Label hint="Assign to me" onHint={() => setAgentAssignee('me')}>Assignee</Label>
-            <div ref={agentRef} style={{ position: 'relative' }}>
-              <div onClick={() => setAgentOpen(o => !o)}
-                style={{ display: 'flex', alignItems: 'center', gap: 10, border: '1.5px solid var(--border)', borderRadius: 4, padding: '9px 12px', background: '#fff', cursor: 'pointer', transition: 'border-color .15s' }}
-                onMouseEnter={e => e.currentTarget.style.borderColor = '#4C9AFF'}
-                onMouseLeave={e => e.currentTarget.style.borderColor = 'var(--border)'}
-              >
-                {currentAgent.isAuto ? (
-                  <div style={{ width: 28, height: 28, borderRadius: '50%', background: '#DEEBFF', color: '#0747A6', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 16, flexShrink: 0 }}>⚙</div>
-                ) : (
-                  <div style={{ width: 28, height: 28, borderRadius: '50%', background: currentAgent.bg, color: currentAgent.color, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 700, flexShrink: 0 }}>{currentAgent.initials}</div>
-                )}
-                <span style={{ fontSize: 13, color: 'var(--text)', flex: 1 }}>{currentAgent.label}</span>
-                <span style={{ color: 'var(--text-faint)', fontSize: 12 }}>▾</span>
-              </div>
-              {agentOpen && (
-                <div style={{ position: 'absolute', top: 'calc(100% + 4px)', left: 0, right: 0, border: '1.5px solid var(--border)', borderRadius: 4, background: '#fff', zIndex: 100, overflow: 'hidden', boxShadow: 'var(--shadow-md)' }}>
-                  {AGENTS.map((a, i) => (
-                    <div key={a.value} onClick={() => { setAgentAssignee(a.value); setAgentOpen(false) }}
-                      style={{ padding: '9px 12px', fontSize: 13, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 8, borderBottom: i < AGENTS.length - 1 ? '1px solid var(--border)' : 'none', background: agentAssignee === a.value ? 'var(--surface-2)' : 'none' }}
-                      onMouseEnter={e => e.currentTarget.style.background = 'var(--surface-2)'}
-                      onMouseLeave={e => e.currentTarget.style.background = agentAssignee === a.value ? 'var(--surface-2)' : 'none'}
-                    >
-                      {a.isAuto ? (
-                        <div style={{ width: 24, height: 24, borderRadius: '50%', background: '#DEEBFF', color: '#0747A6', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14 }}>⚙</div>
-                      ) : (
-                        <div style={{ width: 24, height: 24, borderRadius: '50%', background: a.bg, color: a.color, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 10, fontWeight: 700 }}>{a.initials}</div>
-                      )}
-                      {a.label}
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          </Group>
-
-          {/* 12. PRIORITY */}
+          {/* 11. PRIORITY — custom-styled dropdown, matching admin icons + colours */}
           <Group>
             <Label>Priority</Label>
-            <Wrap>
-              <select value={priority} onChange={e => setPriority(e.target.value)}
-                style={S.select} onFocus={focus} onBlur={blur}
-              >
-                <option value="low">🔵 Low</option>
-                <option value="medium">🟠 Medium</option>
-                <option value="high">🔴 High</option>
-              </select>
-            </Wrap>
+            <PriorityDropdown
+              priorities={availablePriorities}
+              value={priority}
+              onSelect={setPriority}
+            />
             <div style={{ marginTop: 5 }}>
               <a href="#" style={{ fontSize: 11, color: 'var(--brand)' }}>Learn about priority levels ↗</a>
             </div>
           </Group>
 
-          {/* 13. LABELS */}
+          {/* 12. LABELS — multi-select, max 3, scoped to the resolved Request Type group */}
           <Group>
-            <Label>Labels</Label>
-            <Wrap>
-              <select value={label} onChange={e => setLabel(e.target.value)}
-                style={S.select} onFocus={focus} onBlur={blur}
-              >
-                <option value="">Select label</option>
-                <option value="bug">Bug</option>
-                <option value="hardware">Hardware</option>
-                <option value="software">Software</option>
-                <option value="urgent">Urgent</option>
-                <option value="followup">Follow-up</option>
-                <option value="race-day">Race Day</option>
-              </select>
-            </Wrap>
+            <Label hint={`${labelIds.length}/${MAX_LABELS} selected`}>Labels</Label>
+            <LabelsMultiSelect
+              labels={availableLabels}
+              selectedIds={labelIds}
+              onToggle={toggleLabel}
+              disabled={!requestTypeGroup}
+            />
+            {requestTypeGroup && availableLabels.length === 0 && (
+              <p style={{ fontSize: 11, color: 'var(--text-faint)', marginTop: 5 }}>
+                No labels configured for this request type yet.
+              </p>
+            )}
           </Group>
 
-          {/* 14. URGENCY */}
+          {/* 13. URGENCY — custom-styled dropdown, matching admin colours */}
           <div style={{ marginBottom: 0 }}>
             <Label>Urgency</Label>
-            <Wrap>
-              <select value={urgency} onChange={e => setUrgency(e.target.value)}
-                style={S.select} onFocus={focus} onBlur={blur}
-              >
-                <option value="">Select…</option>
-                <option value="critical">🔴 Critical — Operations at risk</option>
-                <option value="high">🟠 High — Major disruption</option>
-                <option value="medium">🟡 Medium — Partial disruption</option>
-                <option value="low">🟢 Low — Minor inconvenience</option>
-              </select>
-            </Wrap>
+            <UrgencyDropdown
+              urgencies={availableUrgencies}
+              value={urgency}
+              onSelect={setUrgency}
+            />
           </div>
 
           {/* Divider */}

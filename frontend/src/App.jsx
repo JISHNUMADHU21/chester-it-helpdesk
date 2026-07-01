@@ -24,11 +24,12 @@ const GroupsPage    = lazy(() => import('./pages/admin/groups/GroupsPage'))
 const GroupFormPage = lazy(() => import('./pages/admin/groups/GroupFormPage'))
 
 // ── Admin — Config ────────────────────────────────────────────────────────────
-const StatusManagePage   = lazy(() => import('./pages/admin/config/StatusManagePage'))
-const PriorityManagePage = lazy(() => import('./pages/admin/config/PriorityManagePage'))
-const UrgencyManagePage  = lazy(() => import('./pages/admin/config/UrgencyManagePage'))
-const WorkTypeManagePage = lazy(() => import('./pages/admin/config/WorkTypeManagePage'))
-const LabelManagePage    = lazy(() => import('./pages/admin/config/LabelManagePage'))
+const StatusManagePage    = lazy(() => import('./pages/admin/config/StatusManagePage'))
+const PriorityManagePage  = lazy(() => import('./pages/admin/config/PriorityManagePage'))
+const UrgencyManagePage   = lazy(() => import('./pages/admin/config/UrgencyManagePage'))
+const WorkTypeManagePage  = lazy(() => import('./pages/admin/config/WorkTypeManagePage'))
+const LabelManagePage     = lazy(() => import('./pages/admin/config/LabelManagePage'))
+const ComponentManagePage = lazy(() => import('./pages/admin/config/ComponentManagePage'))
 
 // ── Admin — Announcements ─────────────────────────────────────────────────────
 const AnnouncementsPage = lazy(() => import('./pages/admin/announcements/AnnouncementsPage'))
@@ -111,6 +112,9 @@ export default function App() {
 
             {/* ── Label Management (manager+) ── */}
             <Route path="/admin/labels"          element={<ProtectedLayout requiredRole="manager"><LabelManagePage /></ProtectedLayout>} />
+
+            {/* ── Component Management (manager+) ── */}
+            <Route path="/admin/components"      element={<ProtectedLayout requiredRole="manager"><ComponentManagePage /></ProtectedLayout>} />
 
             {/* ── Announcements (manager+) ── */}
             <Route path="/admin/announcements"   element={<ProtectedLayout requiredRole="manager"><AnnouncementsPage /></ProtectedLayout>} />

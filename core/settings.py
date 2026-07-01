@@ -149,3 +149,40 @@ CELERY_BEAT_SCHEDULER          = 'django_celery_beat.schedulers:DatabaseSchedule
 
 # Store task results in the database
 CELERY_RESULT_EXTENDED         = True
+
+# ── EMAIL ─────────────────────────────────────────────────────────────────────
+#
+# Generic SMTP configuration — works identically whether EMAIL_HOST points
+# at Gmail (current test setup) or Chester Racecourse's internal mail relay
+# (final production setup). Switching providers is purely an .env change;
+# no code in notifications/email_service.py needs to change at all.
+#
+# TEST SETUP (current): a dedicated Gmail account, using an App Password
+# (NOT the normal account password — Gmail blocks plain password SMTP
+# login by default). To generate one: the Gmail account needs 2-Step
+# Verification enabled, then create an App Password at
+# https://myaccount.google.com/apppasswords and use that 16-character
+# value as EMAIL_HOST_PASSWORD below.
+#
+# PRODUCTION SETUP (when IT provides the real relay): just update
+# EMAIL_HOST, EMAIL_PORT, EMAIL_HOST_USER, EMAIL_HOST_PASSWORD,
+# EMAIL_USE_TLS/EMAIL_USE_SSL, and DEFAULT_FROM_EMAIL in .env — nothing
+# else changes.
+
+EMAIL_BACKEND       = config('EMAIL_BACKEND', default='django.core.mail.backends.smtp.EmailBackend')
+EMAIL_HOST          = config('EMAIL_HOST', default='smtp.gmail.com')
+EMAIL_PORT          = config('EMAIL_PORT', default=587, cast=int)
+EMAIL_HOST_USER     = config('EMAIL_HOST_USER', default='')
+EMAIL_HOST_PASSWORD = config('EMAIL_HOST_PASSWORD', default='')
+EMAIL_USE_TLS       = config('EMAIL_USE_TLS', default=True, cast=bool)
+EMAIL_USE_SSL       = config('EMAIL_USE_SSL', default=False, cast=bool)
+EMAIL_TIMEOUT       = config('EMAIL_TIMEOUT', default=10, cast=int)
+
+# The "From" address shown to recipients, and the helpdesk's display name.
+DEFAULT_FROM_EMAIL  = config('DEFAULT_FROM_EMAIL', default='Chester Racecourse IT Helpdesk <noreply@chesterracecourse.co.uk>')
+
+# Base URL used to build "view this ticket" links inside email templates
+# (e.g. http://localhost:5173 in dev, https://helpdesk.chesterracecourse.co.uk
+# in production). Kept separate from ALLOWED_HOSTS since this is specifically
+# for the frontend URL, not the Django backend's own host.
+FRONTEND_BASE_URL   = config('FRONTEND_BASE_URL', default='http://localhost:5173')

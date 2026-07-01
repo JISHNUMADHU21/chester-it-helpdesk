@@ -52,8 +52,16 @@ export const ticketsAPI = {
     }),
 
   // ── LABELS ───────────────────────────────────────────────────────────────
+  // Used by admin management pages — shows all labels including inactive
+  // ones, so they can be reactivated later (not just hard-deleted).
   listLabels: () =>
     client.get('/labels/'),
+
+  // Used by user-facing selection lists (e.g. Create Ticket page) — only
+  // active labels, scoped to a specific group (or "All Groups" labels,
+  // which always show regardless of group).
+  listActiveLabelsByGroup: (groupId) =>
+    client.get('/labels/', { params: { group: groupId, active_only: true } }),
 
   getLabel: (id) =>
     client.get(`/labels/${id}/`),

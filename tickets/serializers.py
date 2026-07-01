@@ -195,6 +195,14 @@ class TicketCreateSerializer(serializers.ModelSerializer):
             'assigned_group_id', 'assigned_user_id', 'label_ids',
         )
 
+    def validate_label_ids(self, value):
+        # Enforced here on the backend as the source of truth — the
+        # frontend also disables further selection past 3, but that is a
+        # UX convenience only and must never be relied upon alone.
+        if len(value) > 3:
+            raise serializers.ValidationError('You can select a maximum of 3 labels per ticket.')
+        return value
+
     def validate(self, data):
         from departments.models import Group as HelpGroup
         from django.contrib.auth import get_user_model

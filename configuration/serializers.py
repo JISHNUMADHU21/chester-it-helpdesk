@@ -1,6 +1,6 @@
 from rest_framework import serializers
 from django.utils import timezone
-from .models import Status, Priority, Urgency, WorkType, Announcement, AnnouncementAttachment, HomePageLayout
+from .models import Status, Priority, Urgency, WorkType, Component, Announcement, AnnouncementAttachment, HomePageLayout
 from departments.models import Group
 
 
@@ -162,6 +162,65 @@ class WorkTypeCreateUpdateSerializer(serializers.ModelSerializer):
         return instance
 
 
+# ── COMPONENT ─────────────────────────────────────────────────────────────────
+
+class ComponentGroupSerializer(serializers.ModelSerializer):
+    class Meta:
+        model  = Group
+        fields = ['id', 'name', 'icon', 'prefix']
+
+
+class ComponentSerializer(serializers.ModelSerializer):
+    groups = ComponentGroupSerializer(many=True, read_only=True)
+
+    class Meta:
+        model  = Component
+        fields = [
+            'id', 'name', 'slug', 'description',
+            'order', 'is_default', 'is_active', 'groups',
+            'created_at', 'updated_at',
+        ]
+        read_only_fields = ['id', 'created_at', 'updated_at']
+
+
+class ComponentCreateUpdateSerializer(serializers.ModelSerializer):
+    group_ids = serializers.ListField(
+        child=serializers.IntegerField(),
+        write_only=True,
+        required=False,
+        default=list,
+    )
+
+    class Meta:
+        model  = Component
+        fields = [
+            'name', 'slug', 'description',
+            'order', 'is_default', 'is_active', 'group_ids',
+        ]
+
+    def validate_slug(self, value):
+        qs = Component.objects.filter(slug=value)
+        if self.instance:
+            qs = qs.exclude(pk=self.instance.pk)
+        if qs.exists():
+            raise serializers.ValidationError('A component with this slug already exists.')
+        return value
+
+    def create(self, validated_data):
+        group_ids = validated_data.pop('group_ids', [])
+        instance  = super().create(validated_data)
+        if group_ids:
+            instance.groups.set(Group.objects.filter(id__in=group_ids))
+        return instance
+
+    def update(self, instance, validated_data):
+        group_ids = validated_data.pop('group_ids', None)
+        instance  = super().update(instance, validated_data)
+        if group_ids is not None:
+            instance.groups.set(Group.objects.filter(id__in=group_ids))
+        return instance
+
+
 # ── ANNOUNCEMENT ATTACHMENTS ──────────────────────────────────────────────────
 
 class AnnouncementAttachmentSerializer(serializers.ModelSerializer):
@@ -179,19 +238,6 @@ class AnnouncementAttachmentSerializer(serializers.ModelSerializer):
         }
 
     def get_file_url(self, obj):
-        # IMPORTANT: return a RELATIVE url (e.g. /media/...) rather than an
-        # absolute one (e.g. http://127.0.0.1:8000/media/...).
-        #
-        # The frontend dev server (Vite) proxies /media/* to the Django
-        # backend, but that proxy only applies to requests made FROM
-        # JavaScript (fetch/axios/img/video src). An <iframe src="..."> is a
-        # full top-level browser navigation and will go directly to whatever
-        # host is in the URL — bypassing the Vite proxy entirely. Pointing
-        # straight at 127.0.0.1:8000 from inside an iframe nested under
-        # localhost:5173 can fail to connect depending on the browser/host
-        # binding. Returning a relative URL keeps everything on the same
-        # origin as the React app, and Vite's proxy transparently forwards
-        # it to Django.
         if obj.file:
             return obj.file.url
         return None

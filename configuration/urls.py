@@ -4,6 +4,7 @@ from .views import (
     PriorityListCreateView,     PriorityDetailView,
     UrgencyListCreateView,      UrgencyDetailView,
     WorkTypeListCreateView,     WorkTypeDetailView,
+    ComponentListCreateView,    ComponentDetailView,
     AnnouncementListCreateView, AnnouncementDetailView,
     AnnouncementAttachmentListCreateView, AnnouncementAttachmentDetailView,
     HomePageLayoutView,
@@ -25,6 +26,10 @@ urlpatterns = [
     # Work Type
     path('config/work-types/',            WorkTypeListCreateView.as_view(),     name='worktype-list-create'),
     path('config/work-types/<int:pk>/',   WorkTypeDetailView.as_view(),         name='worktype-detail'),
+
+    # Component
+    path('config/components/',            ComponentListCreateView.as_view(),    name='component-list-create'),
+    path('config/components/<int:pk>/',   ComponentDetailView.as_view(),        name='component-detail'),
 
     # Announcements
     path('config/announcements/',          AnnouncementListCreateView.as_view(), name='announcement-list-create'),

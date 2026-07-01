@@ -1,3 +1,5 @@
+import re
+
 from django.db.models import Q
 from django.contrib.auth import get_user_model
 from rest_framework import generics, permissions, status
@@ -21,6 +23,7 @@ from .serializers import (
     LabelSerializer,
     LabelCreateUpdateSerializer,
 )
+from notifications.services import add_interested_party, dispatch_notification
 
 User = get_user_model()
 
@@ -70,6 +73,61 @@ def get_ticket_queryset_for_user(user):
     ).distinct()
 
 
+# ── NOTIFICATION HELPERS (internal to this module) ────────────────────────────
+
+def _notify_group_members_or_assignee(ticket, event_type, message, actor=None,
+                                       from_status=None, to_status=None):
+    """
+    Resolves recipients for a ticket-level event:
+    - If the ticket has an assigned_user, notify all current interested
+      parties on the ticket (reporter, assignee, anyone who commented/
+      reassigned/was mentioned) — this is the general "interested parties"
+      behaviour for status changes etc.
+    - If the ticket has no assigned_user (group-only), notify all members
+      of assigned_group, PLUS any existing interested parties (e.g. the
+      reporter, prior commenters) so nobody following the ticket is missed.
+
+    The acting user (the one who triggered the event) is excluded from
+    their own notification.
+    """
+    from notifications.services import get_interested_parties, get_group_members
+
+    recipients = {}
+
+    interested = get_interested_parties(ticket)
+    for u in interested:
+        recipients[u.pk] = u
+
+    if ticket.assigned_user_id is None and ticket.assigned_group_id is not None:
+        for u in get_group_members(ticket.assigned_group):
+            recipients[u.pk] = u
+
+    dispatch_notification(
+        ticket=ticket,
+        event_type=event_type,
+        message=message,
+        recipients=list(recipients.values()),
+        from_status=from_status,
+        to_status=to_status,
+        exclude_user=actor,
+    )
+
+
+def _parse_mentions(text):
+    """
+    Parses @mentions out of comment text. Expects the frontend to insert
+    mentions in the form @[Full Name](user:<id>) or @[Group Name](group:<id>)
+    when the user selects someone from the searchable @mention dropdown.
+    Returns a tuple of (mentioned_user_ids, mentioned_group_ids).
+    """
+    if not text:
+        return [], []
+
+    user_ids  = [int(m) for m in re.findall(r'@\[[^\]]+\]\(user:(\d+)\)', text)]
+    group_ids = [int(m) for m in re.findall(r'@\[[^\]]+\]\(group:(\d+)\)', text)]
+    return user_ids, group_ids
+
+
 # ── TICKET LIST & CREATE ──────────────────────────────────────────────────────
 
 class TicketListCreateView(APIView):
@@ -117,6 +175,12 @@ class TicketListCreateView(APIView):
         )
         serializer.is_valid(raise_exception=True)
         ticket = serializer.save()
+
+        # ── Notification wiring: reporter is always interested ──
+        add_interested_party(ticket, ticket.reporter, 'reporter')
+        if ticket.assigned_user_id:
+            add_interested_party(ticket, ticket.assigned_user, 'assignee')
+
         return Response(
             TicketDetailSerializer(ticket).data,
             status=status.HTTP_201_CREATED,
@@ -185,10 +249,28 @@ class TicketClaimView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
+        old_status_value = ticket.status
+
         ticket.assigned_user = request.user
         ticket.is_locked     = True
         ticket.status        = 'in_progress'
         ticket.save(update_fields=['assigned_user', 'is_locked', 'status', 'updated_at'])
+
+        # ── Notification wiring: claiming = assignee + reassigned-by-self ──
+        add_interested_party(ticket, request.user, 'assignee')
+        _notify_group_members_or_assignee(
+            ticket=ticket,
+            event_type='assignment',
+            message=f'{request.user.full_name} claimed ticket {ticket.key}.',
+            actor=request.user,
+        )
+        if old_status_value != ticket.status:
+            _notify_group_members_or_assignee(
+                ticket=ticket,
+                event_type='status_change',
+                message=f'Ticket {ticket.key} status changed to {ticket.status}.',
+                actor=request.user,
+            )
 
         return Response(TicketDetailSerializer(ticket).data)
 
@@ -233,6 +315,26 @@ class TicketAssignView(APIView):
         ticket.is_locked      = assigned_user is not None
         ticket.save(update_fields=['assigned_group', 'assigned_user', 'is_locked', 'updated_at'])
 
+        # ── Notification wiring ──
+        # The person performing the (re)assignment becomes interested too
+        # (this covers your example: a group member reassigning a ticket
+        # to Networks should keep getting status-change notifications).
+        add_interested_party(ticket, request.user, 'reassigned')
+        if assigned_user is not None:
+            add_interested_party(ticket, assigned_user, 'assignee')
+
+        if assigned_user is not None:
+            message = f'Ticket {ticket.key} was assigned to {assigned_user.full_name}.'
+        else:
+            message = f'Ticket {ticket.key} was reassigned to {assigned_group.name}.'
+
+        _notify_group_members_or_assignee(
+            ticket=ticket,
+            event_type='reassignment',
+            message=message,
+            actor=request.user,
+        )
+
         return Response(TicketDetailSerializer(ticket).data)
 
 
@@ -255,8 +357,18 @@ class TicketStatusView(APIView):
         serializer = TicketStatusSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
 
+        old_status_value = ticket.status
         ticket.status = serializer.validated_data['status']
         ticket.save(update_fields=['status', 'updated_at'])
+
+        # ── Notification wiring ──
+        if old_status_value != ticket.status:
+            _notify_group_members_or_assignee(
+                ticket=ticket,
+                event_type='status_change',
+                message=f'Ticket {ticket.key} status changed from {old_status_value} to {ticket.status}.',
+                actor=request.user,
+            )
 
         return Response(TicketDetailSerializer(ticket).data)
 
@@ -293,6 +405,48 @@ class CommentListCreateView(APIView):
         serializer = CommentCreateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         comment = serializer.save(ticket=ticket, author=request.user)
+
+        # ── Notification wiring ──
+        add_interested_party(ticket, request.user, 'commented')
+
+        mentioned_user_ids, mentioned_group_ids = _parse_mentions(
+            getattr(comment, 'body', None) or getattr(comment, 'message', '') or ''
+        )
+
+        mentioned_users = {}
+        if mentioned_user_ids:
+            for u in User.objects.filter(id__in=mentioned_user_ids):
+                mentioned_users[u.pk] = u
+                add_interested_party(ticket, u, 'mentioned')
+
+        if mentioned_group_ids:
+            from departments.models import Group
+            for group in Group.objects.filter(id__in=mentioned_group_ids):
+                from notifications.services import get_group_members
+                for u in get_group_members(group):
+                    mentioned_users[u.pk] = u
+                    add_interested_party(ticket, u, 'mentioned')
+
+        # Notify everyone interested in the ticket about the new comment
+        _notify_group_members_or_assignee(
+            ticket=ticket,
+            event_type='comment',
+            message=f'{request.user.full_name} commented on ticket {ticket.key}.',
+            actor=request.user,
+        )
+
+        # Additionally notify newly @mentioned users specifically, in case
+        # they weren't already covered by the general interested-parties
+        # notification above (e.g. they're not a group member and weren't
+        # previously interested).
+        if mentioned_users:
+            dispatch_notification(
+                ticket=ticket,
+                event_type='mention',
+                message=f'{request.user.full_name} mentioned you on ticket {ticket.key}.',
+                recipients=list(mentioned_users.values()),
+                exclude_user=request.user,
+            )
 
         return Response(
             CommentSerializer(comment).data,
@@ -369,13 +523,28 @@ class TicketLinkCreateView(APIView):
 
 
 # ── LABELS ────────────────────────────────────────────────────────────────────
+#
+# NOTE on delete semantics: Delete is now a HARD delete, matching the
+# convention already applied to Status/Priority/Urgency/WorkType/Component
+# in the configuration app — Inactive is a separate state set via Edit,
+# which keeps the label visible in the admin list (for reactivation later)
+# but excludes it from user-facing selection lists when active_only is set.
 
 class LabelListCreateView(generics.ListCreateAPIView):
     """
-    GET  /api/labels/  — List all active labels
+    GET  /api/labels/  — List labels (all by default; supports filtering)
     POST /api/labels/  — Create a label (manager+ only)
+
+    Query params:
+      group       — only labels assigned to this group, OR labels with no
+                    groups at all ("All Groups" convention, same as
+                    WorkType/Component).
+      active_only — when truthy, excludes labels the admin has marked
+                    inactive. Used by user-facing selection lists (e.g.
+                    Create Ticket's Labels picker). The admin management
+                    page omits this param so it can still see and
+                    reactivate inactive labels.
     """
-    queryset = Label.objects.filter(is_active=True).order_by('name')
 
     def get_permissions(self):
         if self.request.method == 'POST':
@@ -387,6 +556,21 @@ class LabelListCreateView(generics.ListCreateAPIView):
             return LabelCreateUpdateSerializer
         return LabelSerializer
 
+    def get_queryset(self):
+        qs = Label.objects.prefetch_related('groups').all().order_by('name')
+
+        group_id = self.request.query_params.get('group')
+        if group_id:
+            qs = qs.filter(
+                Q(groups__isnull=True) | Q(groups__id=group_id)
+            ).distinct()
+
+        active_only = self.request.query_params.get('active_only')
+        if active_only:
+            qs = qs.filter(is_active=True)
+
+        return qs
+
     def perform_create(self, serializer):
         serializer.save(created_by=self.request.user)
 
@@ -395,7 +579,7 @@ class LabelDetailView(generics.RetrieveUpdateDestroyAPIView):
     """
     GET    /api/labels/{id}/  — Get label detail
     PATCH  /api/labels/{id}/  — Update label (manager+ only)
-    DELETE /api/labels/{id}/  — Deactivate label (manager+ only)
+    DELETE /api/labels/{id}/  — Permanently delete label (manager+ only)
     """
     queryset = Label.objects.all()
 
@@ -410,5 +594,4 @@ class LabelDetailView(generics.RetrieveUpdateDestroyAPIView):
         return LabelSerializer
 
     def perform_destroy(self, instance):
-        instance.is_active = False
-        instance.save()
+        instance.delete()

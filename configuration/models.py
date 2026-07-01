@@ -116,6 +116,49 @@ class WorkType(models.Model):
         super().save(*args, **kwargs)
 
 
+class Component(models.Model):
+    """
+    Configurable ticket "Component" options (e.g. Hardware, Software,
+    Network, EPOS/Tills, Access & Permissions, Other) — previously
+    hardcoded on the Create Ticket page. Group-scoped exactly like
+    WorkType: superadmin/admin manage components for any/all groups,
+    managers manage components only for their own group(s).
+
+    An empty `groups` M2M means the component applies to ALL groups
+    (same "All Groups" convention used by WorkType, Label, and
+    Announcements elsewhere in the system).
+    """
+    name        = models.CharField(max_length=100, unique=True)
+    slug        = models.SlugField(max_length=100, unique=True)
+    description = models.TextField(blank=True)
+    order       = models.PositiveIntegerField(default=0)
+    is_default  = models.BooleanField(default=False)
+    is_active   = models.BooleanField(default=True)
+    groups      = models.ManyToManyField(
+        'departments.Group',
+        blank=True,
+        related_name='components',
+        db_table='config_component_groups',
+        help_text='Leave empty to apply to all groups.',
+    )
+    created_at  = models.DateTimeField(auto_now_add=True)
+    updated_at  = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table            = 'config_component'
+        ordering            = ['order', 'name']
+        verbose_name        = 'Component'
+        verbose_name_plural = 'Components'
+
+    def __str__(self):
+        return self.name
+
+    def save(self, *args, **kwargs):
+        if self.is_default:
+            Component.objects.exclude(pk=self.pk).update(is_default=False)
+        super().save(*args, **kwargs)
+
+
 class Announcement(models.Model):
     TAG_CHOICES = [
         ('maintenance', 'Maintenance'),

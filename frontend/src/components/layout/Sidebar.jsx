@@ -244,6 +244,15 @@ export default function Sidebar() {
           />
           <Divider />
 
+          {/* Component Management — header navigates directly */}
+          <SectionHeader
+            to="/admin/components"
+            icon="🧩"
+            label="Component Management"
+            active={path.startsWith('/admin/components')}
+          />
+          <Divider />
+
           {/* Announcements — header navigates directly */}
           <SectionHeader
             to="/admin/announcements"

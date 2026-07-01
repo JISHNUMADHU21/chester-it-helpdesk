@@ -153,13 +153,16 @@ function GroupDropdown({ groups, selectedGroup, onSelect, placeholder = 'All Wor
 }
 
 // ── Searchable group multi-select list (for assign to groups) ─────────────────
-function GroupSearchList({ groups, selectedIds, onToggle }) {
+// showAllGroups / onSelectAllGroups are optional — when provided, an "All
+// Groups" row is rendered first (superadmin/admin only, per caller).
+function GroupSearchList({ groups, selectedIds, onToggle, showAllGroups, onSelectAllGroups }) {
   const [search, setSearch] = useState('')
   const filtered = groups.filter(g =>
     !search ||
     g.name.toLowerCase().includes(search.toLowerCase()) ||
     g.prefix.toLowerCase().includes(search.toLowerCase())
   )
+  const isAllGroupsSelected = showAllGroups && selectedIds.length === 0
   return (
     <div>
       <div style={{ position: 'relative', marginBottom: 8 }}>
@@ -178,6 +181,28 @@ function GroupSearchList({ groups, selectedIds, onToggle }) {
         </svg>
       </div>
       <div style={{ border: '1.5px solid var(--border)', borderRadius: 4, maxHeight: 200, overflowY: 'auto', background: '#fff' }}>
+        {showAllGroups && (
+          <label
+            onClick={onSelectAllGroups}
+            style={{
+              display: 'flex', alignItems: 'center', gap: 10, padding: '9px 12px',
+              borderBottom: '1px solid var(--border)',
+              cursor: 'pointer', background: isAllGroupsSelected ? '#F0F4FF' : 'var(--surface-2)',
+            }}
+          >
+            <div style={{
+              width: 15, height: 15, borderRadius: 3, flexShrink: 0,
+              border: '1.5px solid ' + (isAllGroupsSelected ? 'var(--brand)' : 'var(--border)'),
+              background: isAllGroupsSelected ? 'var(--brand)' : '#fff',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+            }}>
+              {isAllGroupsSelected && <svg width="9" height="7" viewBox="0 0 10 8" fill="none"><path d="M1 4L3.5 6.5L9 1" stroke="white" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/></svg>}
+            </div>
+            <div style={{ width: 24, height: 24, borderRadius: 3, background: '#EAE6FF', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, flexShrink: 0 }}>*</div>
+            <span style={{ fontSize: 13, fontWeight: isAllGroupsSelected ? 600 : 500, color: isAllGroupsSelected ? 'var(--brand)' : 'var(--text)', flex: 1 }}>All Groups</span>
+            <span style={{ fontSize: 11, color: 'var(--text-faint)' }}>Everyone</span>
+          </label>
+        )}
         {filtered.length === 0 ? (
           <div style={{ padding: '12px', textAlign: 'center', fontSize: 12, color: 'var(--text-faint)' }}>No groups found</div>
         ) : filtered.map((g, idx) => {
@@ -210,7 +235,7 @@ function GroupSearchList({ groups, selectedIds, onToggle }) {
         })}
       </div>
       {/* Selected tags */}
-      {selectedIds.length > 0 && (
+      {selectedIds.length > 0 ? (
         <div style={{ marginTop: 8, display: 'flex', flexWrap: 'wrap', gap: 5 }}>
           {groups.filter(g => selectedIds.includes(g.id)).map(g => (
             <span key={g.id} style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '2px 8px 2px 6px', borderRadius: 20, background: '#DEEBFF', color: 'var(--brand)', fontSize: 11, fontWeight: 500 }}>
@@ -219,7 +244,11 @@ function GroupSearchList({ groups, selectedIds, onToggle }) {
             </span>
           ))}
         </div>
-      )}
+      ) : showAllGroups ? (
+        <div style={{ marginTop: 8, fontSize: 11, color: 'var(--text-faint)' }}>
+          Currently assigned to: All Groups
+        </div>
+      ) : null}
     </div>
   )
 }
@@ -351,6 +380,10 @@ export default function WorkTypeManagePage() {
     setGroupIds(prev => prev.includes(id) ? prev.filter(g => g !== id) : [...prev, id])
   }
 
+  function selectAllGroups() {
+    setGroupIds([])
+  }
+
   const displayIcon = iconPreview || (removeIcon ? null : existingIcon)
 
   // Auto-select single group for manager in one group
@@ -445,7 +478,7 @@ export default function WorkTypeManagePage() {
                               {g.icon} {g.name}
                             </span>
                           ))
-                        : <span style={{ fontSize: 12, color: 'var(--text-faint)', fontStyle: 'italic' }}>None</span>
+                        : <span style={{ fontSize: 12, color: 'var(--text-faint)', fontStyle: 'italic' }}>All Groups</span>
                       }
                     </div>
                   </td>
@@ -553,7 +586,7 @@ export default function WorkTypeManagePage() {
             {errors.icon && <div style={{ fontSize: 12, color: 'var(--danger)', marginTop: 6 }}>⊘ {errors.icon}</div>}
           </div>
 
-          {/* Assign to Groups — searchable list */}
+          {/* Assign to Groups — searchable list, with "All Groups" for admin+ only */}
           <div style={{ marginBottom: 16 }}>
             <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: 'var(--text)', marginBottom: 8 }}>
               Assign to Groups
@@ -565,6 +598,8 @@ export default function WorkTypeManagePage() {
               groups={visibleGroups}
               selectedIds={groupIds}
               onToggle={toggleGroupId}
+              showAllGroups={!isManagerOnly}
+              onSelectAllGroups={selectAllGroups}
             />
           </div>
 
