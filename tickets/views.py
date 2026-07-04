@@ -81,11 +81,9 @@ def _notify_group_members_or_assignee(ticket, event_type, message, actor=None,
     Resolves recipients for a ticket-level event:
     - If the ticket has an assigned_user, notify all current interested
       parties on the ticket (reporter, assignee, anyone who commented/
-      reassigned/was mentioned) — this is the general "interested parties"
-      behaviour for status changes etc.
+      reassigned/was mentioned).
     - If the ticket has no assigned_user (group-only), notify all members
-      of assigned_group, PLUS any existing interested parties (e.g. the
-      reporter, prior commenters) so nobody following the ticket is missed.
+      of assigned_group, PLUS any existing interested parties.
 
     The acting user (the one who triggered the event) is excluded from
     their own notification.
@@ -176,10 +174,28 @@ class TicketListCreateView(APIView):
         serializer.is_valid(raise_exception=True)
         ticket = serializer.save()
 
-        # ── Notification wiring: reporter is always interested ──
+        # ── Interested party tracking ──
+        # Must happen before dispatch_notification so get_interested_parties
+        # returns someone to notify via the in-app bell.
         add_interested_party(ticket, ticket.reporter, 'reporter')
         if ticket.assigned_user_id:
             add_interested_party(ticket, ticket.assigned_user, 'assignee')
+
+        # ── In-app notifications (bell dropdown) ──
+        # actor=None so nobody is excluded — reporter gets in-app too.
+        _notify_group_members_or_assignee(
+            ticket=ticket,
+            event_type='assignment',
+            message=f'New ticket {ticket.key} was raised: {ticket.summary}',
+            actor=None,
+        )
+
+        # ── Emails — fired via Celery so the HTTP response returns
+        # instantly. The task re-fetches the ticket fresh from the
+        # database by ID to guarantee correct ticket key and all
+        # related data (reporter, assignee, group, labels, attachments).
+        from notifications.tasks import send_ticket_creation_emails
+        send_ticket_creation_emails.delay(ticket.id)
 
         return Response(
             TicketDetailSerializer(ticket).data,
@@ -256,7 +272,7 @@ class TicketClaimView(APIView):
         ticket.status        = 'in_progress'
         ticket.save(update_fields=['assigned_user', 'is_locked', 'status', 'updated_at'])
 
-        # ── Notification wiring: claiming = assignee + reassigned-by-self ──
+        # ── Notification wiring ──
         add_interested_party(ticket, request.user, 'assignee')
         _notify_group_members_or_assignee(
             ticket=ticket,
@@ -316,9 +332,6 @@ class TicketAssignView(APIView):
         ticket.save(update_fields=['assigned_group', 'assigned_user', 'is_locked', 'updated_at'])
 
         # ── Notification wiring ──
-        # The person performing the (re)assignment becomes interested too
-        # (this covers your example: a group member reassigning a ticket
-        # to Networks should keep getting status-change notifications).
         add_interested_party(ticket, request.user, 'reassigned')
         if assigned_user is not None:
             add_interested_party(ticket, assigned_user, 'assignee')
@@ -435,10 +448,7 @@ class CommentListCreateView(APIView):
             actor=request.user,
         )
 
-        # Additionally notify newly @mentioned users specifically, in case
-        # they weren't already covered by the general interested-parties
-        # notification above (e.g. they're not a group member and weren't
-        # previously interested).
+        # Additionally notify newly @mentioned users specifically
         if mentioned_users:
             dispatch_notification(
                 ticket=ticket,

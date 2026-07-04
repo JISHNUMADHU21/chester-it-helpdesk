@@ -1,0 +1,42 @@
+Chester Racecourse IT Helpdesk
+{{ email_type_label }}
+==============================
+
+Hi {{ recipient_name }},
+
+{{ message }}
+
+-------------------------------
+TICKET: {{ ticket_key }}
+-------------------------------
+Summary:      {{ ticket_summary }}
+Status:       {{ ticket_status|default:"—" }}
+Priority:     {{ ticket_priority|default:"—" }}
+Urgency:      {{ ticket_urgency|default:"—" }}
+Work Type:    {{ ticket_work_type|default:"—" }}
+Components:   {{ ticket_components|default:"—" }}
+Labels:       {{ ticket_labels|default:"—" }}
+Reporter:     {{ ticket_reporter|default:"—" }}
+Assignee:     {{ ticket_assignee|default:"—" }}
+Group:        {{ ticket_group|default:"—" }}
+Due Date:     {{ ticket_due_date|default:"—" }}
+Created:      {{ ticket_created_at|default:"—" }}
+Last Updated: {{ ticket_updated_at|default:"—" }}
+
+{% if ticket_description %}
+Description:
+{{ ticket_description }}
+{% endif %}
+
+{% if ticket_attachments %}
+Attachments:
+{% for attachment in ticket_attachments %}  - {{ attachment.original_name }} ({{ attachment.file_size_display }})
+{% endfor %}
+{% endif %}
+
+View this ticket: {{ ticket_url }}
+
+-------------------------------
+Chester Racecourse IT Helpdesk
+{{ frontend_base_url }}
+© {{ current_year }} Chester Racecourse. All rights reserved.
